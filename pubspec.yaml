@@ -1,0 +1,77 @@
+name: Auras
+description: "AURAS - Certificate App"
+publish_to: 'none'
+version: 1.0.0+1
+
+
+environment:
+  sdk: ^3.8.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  http: ^1.2.2
+  image_picker: ^1.0.4
+  path_provider: ^2.0.15
+  open_file: ^3.3.2
+  sqflite: ^2.4.2
+  sqflite_common_ffi: ^2.4.0+3
+  sqflite_common_ffi_web: ^1.1.1
+  path: ^1.9.0
+  connectivity_plus: ^5.0.2
+  pdf: ^3.10.7
+  printing: ^5.12.0
+  flutter_pdfview: ^1.3.1
+  url_launcher: ^6.2.5
+  # syncfusion_flutter_pdf: 20.3.59
+  signature: ^5.4.0
+  shared_preferences: ^2.2.2
+  provider: ^6.1.2
+  file_picker: ^8.1.7 
+  google_fonts: ^8.1.0
+  # syncfusion_flutter_pdfviewer: 20.3.59
+  syncfusion_flutter_pdf: ^31.1.17
+  syncfusion_flutter_pdfviewer: ^31.1.17
+  pasteboard: ^0.2.0
+
+
+
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/TOWAGE.pdf
+    - assets/SEAFASTENING.pdf
+    - assets/LOADOUT.pdf
+    - assets/towage_template.pdf
+    - assets/images/Baharin.W.L.L.png
+    - assets/images/MARINE.LLC.png
+    - assets/images/OILFIELDSERVICELOGO.png
+    - assets/images/Aries.png
+    - assets/images/Logo.png
+    - assets/stamps/aries_marine_logo.png
+    - assets/stamps/A_O_F_S.jpeg
+    - assets/stamps/Aries_Marine_S_P_C.jpeg
+    - assets/images/saudilogo.png
+    - assets/images/QatarLogo.jpg
+    
+    
+
+
+
+    
+  
+ 
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.13.1   # ✅ Required to generate app icons
+
+
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/app_icon.png"  # ✅ Path to your logo image
