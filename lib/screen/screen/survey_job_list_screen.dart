@@ -309,7 +309,34 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
       await _loadJobs();
     }
   }
+String _formatSurveyDate(DateTime date) {
+  final day = date.day.toString().padLeft(2, '0');
+  final month = date.month.toString().padLeft(2, '0');
+  return '$day-$month-${date.year}';
+}
 
+Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
+  final picked = await showDatePicker(
+    context: context,
+    initialDate: job.surveyDate ?? DateTime.now(),
+    firstDate: DateTime(2000),
+    lastDate: DateTime(2100),
+  );
+
+  if (picked == null) return;
+
+  try {
+    await ApiService.updateSurveyDate(
+      surveyJobId: job.id,
+      surveyDate: picked,
+    );
+
+    _showMessage('Survey date saved successfully.');
+    await _loadJobs();
+  } catch (e) {
+    _showMessage(e.toString());
+  }
+}
   Future<void> _loadJobs() async {
     setState(() {
       isLoading = true;
@@ -1985,6 +2012,43 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
 
                 // ── Surveyor badge ──
                 if (job.hasAssignedSurveyors) _surveyorAssignmentBadge(job),
+                if (!isAdmin)
+  Container(
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+    margin: const EdgeInsets.only(bottom: 12),
+    decoration: BoxDecoration(
+      color: _AppColors.ocean.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: _AppColors.ocean.withOpacity(0.2)),
+    ),
+    child: Row(
+      children: [
+        const Icon(
+          Icons.calendar_today_outlined,
+          size: 16,
+          color: _AppColors.ocean,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            job.surveyDate == null
+                ? 'Survey Date: Not selected'
+                : 'Survey Date: ${_formatSurveyDate(job.surveyDate!)}',
+            style: const TextStyle(
+              fontSize: 12,
+              color: _AppColors.ocean,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        TextButton(
+          onPressed: () => _pickAndSaveSurveyDate(job),
+          child: Text(job.surveyDate == null ? 'Select' : 'Change'),
+        ),
+      ],
+    ),
+  ),
 
                 // ── Action Buttons ──
                 Wrap(

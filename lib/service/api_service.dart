@@ -836,7 +836,27 @@ class ApiService {
     final List data = jsonDecode(response.body);
     return data.map((e) => SurveyJob.fromJson(e)).toList();
   }
+  static Future<void> updateSurveyDate({
+  required int surveyJobId,
+  required DateTime surveyDate,
+}) async {
+  final url = Uri.parse('$baseUrl/survey/jobs/$surveyJobId/survey-date');
 
+  final response = await http.post(
+    url,
+    headers: {
+      'Content-Type': 'application/json',
+      ...await _authHeaders(),
+    },
+    body: jsonEncode({
+      'surveyDate': surveyDate.toIso8601String(),
+    }),
+  );
+
+  if (response.statusCode != 200) {
+    throw Exception("Failed to update survey date: ${response.body}");
+  }
+}
   static Future<void> updateSurveyJobStatus({
     required int surveyJobId,
     required String status,
@@ -1396,6 +1416,7 @@ class ApiService {
     required int vesselId,
     required String siteName,
     required String startDate,
+  
     required String endDate,
     required int createdByUserId,
     String? auditPort,

@@ -16,6 +16,7 @@ class SurveyJob {
   final String? auditPort;
   final String? auditAddress;
   final DateTime? startDate;
+  final DateTime? surveyDate;
   final DateTime? endDate;
   final List<SurveyAssignment> assignments;
 
@@ -37,6 +38,7 @@ class SurveyJob {
     this.auditPort,
     this.auditAddress,
     this.startDate,
+    this.surveyDate,
     this.endDate,
     this.assignments = const [],
   });
@@ -67,6 +69,9 @@ class SurveyJob {
       startDate: json['startDate'] == null
           ? null
           : DateTime.tryParse(json['startDate'].toString()),
+      surveyDate: json['surveyDate'] == null
+          ? null
+          : DateTime.tryParse(json['surveyDate'].toString()),
       endDate: json['endDate'] == null
           ? null
           : DateTime.tryParse(json['endDate'].toString()),

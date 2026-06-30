@@ -1356,32 +1356,47 @@ class _ImagesTabState extends State<_ImagesTab> {
   }
 
   Future<void> _pick(ImageSource source) async {
-    try {
+  try {
+    setState(() => uploading = true);
+
+    final List<XFile> files;
+    if (source == ImageSource.gallery) {
+      files = await picker.pickMultiImage(imageQuality: 75);
+    } else {
       final file = await picker.pickImage(source: source, imageQuality: 75);
-      if (file == null) return;
+      files = file == null ? <XFile>[] : <XFile>[file];
+    }
 
-      setState(() => uploading = true);
+    if (files.isEmpty) {
+      if (mounted) setState(() => uploading = false);
+      return;
+    }
 
+    final uploadedPhotos = <IhmSamplingPhoto>[];
+
+    for (final file in files) {
       final bytes = await file.readAsBytes();
       final uploaded = await IhmOfflineService.saveCheckpointPhoto(
         checkpoint: widget.checkpoint,
         fileBytes: bytes,
         fileName: file.name,
       );
-
-      if (!mounted) return;
-      setState(() {
-        photos.insert(0, uploaded);
-        uploading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => uploading = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(e.toString())));
+      uploadedPhotos.add(uploaded);
     }
+
+    if (!mounted) return;
+    setState(() {
+      photos.insertAll(0, uploadedPhotos.reversed);
+      uploading = false;
+    });
+  } catch (e) {
+    if (!mounted) return;
+    setState(() => uploading = false);
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(e.toString())));
   }
+}
 
   void _showImageOptions() {
     showModalBottomSheet(
