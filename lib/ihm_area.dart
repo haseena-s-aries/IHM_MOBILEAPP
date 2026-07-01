@@ -290,6 +290,7 @@ class IhmLayoutImage {
   final int? ihmAreaId;
   final String filePath;
   final String originalFileName;
+  final String? contentType;
   final bool isCommon;
 
   IhmLayoutImage({
@@ -297,6 +298,7 @@ class IhmLayoutImage {
     this.ihmAreaId,
     required this.filePath,
     required this.originalFileName,
+    this.contentType,
     required this.isCommon,
   });
 
@@ -307,6 +309,7 @@ class IhmLayoutImage {
         : int.tryParse(json['ihmAreaId'].toString()),
     filePath: json['filePath']?.toString() ?? '',
     originalFileName: json['originalFileName']?.toString() ?? 'Layout',
+    contentType: json['contentType']?.toString(),
     isCommon: json['isCommon'] == true,
   );
 }

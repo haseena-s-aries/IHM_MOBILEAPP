@@ -8,6 +8,7 @@ import 'package:Auras/service/api_service.dart';       // ← ADD THIS
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 
 // ─── Theme Colors ─────────────────────────────────────────────────────────────
 class _TC {
@@ -324,7 +325,6 @@ class _IhmAreasScreenState extends State<IhmAreasScreen> {
       ),
     );
   }
-
   Widget _statRow(IconData icon, String label, String value, Color color) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 5),

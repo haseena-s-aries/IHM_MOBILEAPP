@@ -129,7 +129,7 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
     }
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['png', 'jpg', 'jpeg'],
+      allowedExtensions: ['png', 'jpg', 'jpeg', 'webp', 'pdf'],
       withData: true,
     );
     if (result == null || result.files.single.bytes == null) return;

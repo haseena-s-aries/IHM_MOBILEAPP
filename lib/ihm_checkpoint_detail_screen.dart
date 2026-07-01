@@ -8,7 +8,7 @@ import 'package:Auras/utils/app_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 // ─── Theme Colors ─────────────────────────────────────────────────────────────
 class _TC {
   final Color bgDark, bgCard, bgCardAlt, textPrimary, textSecond, divider;
@@ -990,22 +990,14 @@ class _AreaTabState extends State<_AreaTab> {
       );
     }
 
-    if (imagePath!.toLowerCase().endsWith('.pdf')) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.picture_as_pdf_outlined, color: _A.accentRed, size: 48),
-            const SizedBox(height: 12),
-            Text(
-              'PDF layout needs conversion to image\nbefore marking. Upload PNG/JPG layout.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: _c.textSecond, fontSize: 14),
-            ),
-          ],
-        ),
-      );
-    }
+if (imagePath!.toLowerCase().endsWith('.pdf')) {
+  return SfPdfViewer.network(
+    ApiService.fileUrl(imagePath!),
+    canShowScrollHead: true,
+    canShowScrollStatus: true,
+    enableDoubleTapZooming: true,
+  );
+}
 
     return Stack(
       children: [
@@ -1261,21 +1253,31 @@ class _AreaTabState extends State<_AreaTab> {
 
                       leading: ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        child: Image.network(
-                          ApiService.fileUrl(layout.filePath),
-                          width: 58,
-                          height: 48,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
-                            width: 58,
-                            height: 48,
-                            color: _c.divider,
-                            child: const Icon(
-                              Icons.broken_image_outlined,
-                              color: _A.accentRed,
-                            ),
-                          ),
-                        ),
+                        child: layout.filePath.toLowerCase().endsWith('.pdf')
+                            ? Container(
+                                width: 58,
+                                height: 48,
+                                color: _c.divider,
+                                child: const Icon(
+                                  Icons.picture_as_pdf_outlined,
+                                  color: _A.accentRed,
+                                ),
+                              )
+                            : Image.network(
+                                ApiService.fileUrl(layout.filePath),
+                                width: 58,
+                                height: 48,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Container(
+                                  width: 58,
+                                  height: 48,
+                                  color: _c.divider,
+                                  child: const Icon(
+                                    Icons.broken_image_outlined,
+                                    color: _A.accentRed,
+                                  ),
+                                ),
+                              ),
                       ),
 
                       title: Text(
