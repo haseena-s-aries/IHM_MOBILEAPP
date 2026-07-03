@@ -2010,45 +2010,8 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
 
                 const SizedBox(height: 12),
 
-                // ── Surveyor badge ──
-                if (job.hasAssignedSurveyors) _surveyorAssignmentBadge(job),
-                if (!isAdmin)
-  Container(
-    width: double.infinity,
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-    margin: const EdgeInsets.only(bottom: 12),
-    decoration: BoxDecoration(
-      color: _AppColors.ocean.withOpacity(0.08),
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: _AppColors.ocean.withOpacity(0.2)),
-    ),
-    child: Row(
-      children: [
-        const Icon(
-          Icons.calendar_today_outlined,
-          size: 16,
-          color: _AppColors.ocean,
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            job.surveyDate == null
-                ? 'Survey Date: Not selected'
-                : 'Survey Date: ${_formatSurveyDate(job.surveyDate!)}',
-            style: const TextStyle(
-              fontSize: 12,
-              color: _AppColors.ocean,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-        TextButton(
-          onPressed: () => _pickAndSaveSurveyDate(job),
-          child: Text(job.surveyDate == null ? 'Select' : 'Change'),
-        ),
-      ],
-    ),
-  ),
+            
+          _buildJobMetaGrid(job),
 
                 // ── Action Buttons ──
                 Wrap(
@@ -2102,50 +2065,136 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
       ),
     );
   }
+Widget _buildJobMetaGrid(SurveyJob job) {
+  final primaryName = job.primarySurveyorName;
+  final secondaryName = job.secondarySurveyorName;
 
-  Widget _surveyorAssignmentBadge(SurveyJob job) {
-    final activeAssignments = job.activeAssignments;
-    final primaryName = job.primarySurveyorName;
-    final secondaryName = job.secondarySurveyorName;
-    final assignedAt = activeAssignments.isNotEmpty
-        ? activeAssignments.first.assignedAt
-        : job.assignedAt;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: _AppColors.success.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _AppColors.success.withOpacity(0.2)),
+  final tiles = <Widget>[
+    _metaTile(
+      label: 'Survey Date',
+      value: job.surveyDate == null
+          ? 'Not selected'
+          : _formatSurveyDate(job.surveyDate!),
+      icon: Icons.calendar_today_outlined,
+      color: _AppColors.ocean,
+      onTap: isAdmin ? null : () => _pickAndSaveSurveyDate(job),
+      actionText: isAdmin ? null : (job.surveyDate == null ? 'Select' : 'Change'),
+    ),
+    if (primaryName != null && primaryName.trim().isNotEmpty)
+      _metaTile(
+        label: 'Primary Surveyor',
+        value: primaryName,
+        icon: Icons.person_outline,
+        color: _AppColors.success,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (primaryName != null && primaryName.trim().isNotEmpty)
-            _assignmentLine('Primary', primaryName),
-          if (secondaryName != null && secondaryName.trim().isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: _assignmentLine('Secondary', secondaryName),
-            ),
-          if (assignedAt != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 4, left: 20),
+    if (secondaryName != null && secondaryName.trim().isNotEmpty)
+      _metaTile(
+        label: 'Secondary Surveyor',
+        value: secondaryName,
+        icon: Icons.person_outline,
+        color: _AppColors.success,
+      ),
+    if ((primaryName == null || primaryName.trim().isEmpty) &&
+        (secondaryName == null || secondaryName.trim().isEmpty) &&
+        job.assignedSurveyorName != null &&
+        job.assignedSurveyorName!.trim().isNotEmpty)
+      _metaTile(
+        label: 'Surveyor',
+        value: job.assignedSurveyorName!,
+        icon: Icons.person_outline,
+        color: _AppColors.success,
+      ),
+  ];
+
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: Row(
+      children: [
+        for (int i = 0; i < tiles.length; i++) ...[
+          Expanded(child: tiles[i]),
+          if (i != tiles.length - 1) const SizedBox(width: 8),
+        ],
+      ],
+    ),
+  );
+}
+Widget _metaTile({
+  required String label,
+  required String value,
+  required IconData icon,
+  required Color color,
+  VoidCallback? onTap,
+  String? actionText,
+}) {
+  final content = Container(
+    constraints: const BoxConstraints(minHeight: 62),
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: color.withOpacity(0.2)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 5),
+            Expanded(
               child: Text(
-                _formatDateTime(assignedAt),
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: _AppColors.success,
-                  fontWeight: FontWeight.w500,
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 9.5,
+                  color: color,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
             ),
-        ],
-      ),
-    );
-  }
+          ],
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: color,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            if (actionText != null) ...[
+              const SizedBox(width: 4),
+              Text(
+                actionText,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: color,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
+    ),
+  );
+
+  if (onTap == null) return content;
+
+  return InkWell(
+    borderRadius: BorderRadius.circular(8),
+    onTap: onTap,
+    child: content,
+  );
+}
 
   Widget _assignmentLine(String label, String name) {
     return Row(

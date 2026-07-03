@@ -6,9 +6,11 @@ import 'package:Auras/service/api_service.dart';
 import 'package:Auras/utils/app_dialog.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/painting.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
+
 // ─── Theme Colors ─────────────────────────────────────────────────────────────
 class _TC {
   final Color bgDark, bgCard, bgCardAlt, textPrimary, textSecond, divider;
@@ -726,20 +728,93 @@ class _AreaTabState extends State<_AreaTab> {
   String? layoutError;
   int _loadSeq = 0;
   final TransformationController _controller = TransformationController();
-  static const double mapWidth = 1200;
-  static const double mapHeight = 850;
+  final GlobalKey _layoutImageKey = GlobalKey();
+  Size? _layoutImageSize;
+
+  double get mapWidth => _layoutImageSize?.width ?? 1400;
+  double get mapHeight => _layoutImageSize?.height ?? 990;
+
+  Rect getFittedImageRect({
+    required Size containerSize,
+    required Size imageSize,
+    BoxFit fit = BoxFit.contain,
+  }) {
+    final fitted = applyBoxFit(fit, imageSize, containerSize);
+    return Alignment.center.inscribe(
+      fitted.destination,
+      Offset.zero & containerSize,
+    );
+  }
+
+  double _storedPercentToUnit(double value) {
+    if (value > 1) return (value / 100).clamp(0.0, 1.0);
+    return value.clamp(0.0, 1.0);
+  }
 
   _TC get _c => widget.isDark ? _TC.dark : _TC.light;
+  String _normalizeMarkerPath(String? path) {
+    final value = (path ?? '').trim();
+    if (value.isEmpty) return '';
+
+    final parsed = Uri.tryParse(value);
+    if (parsed != null && parsed.hasScheme) {
+      return parsed.path.replaceFirst(RegExp(r'^/+'), '').toLowerCase();
+    }
+
+    return value
+        .replaceFirst(RegExp(r'^https?://[^/]+', caseSensitive: false), '')
+        .replaceFirst(RegExp(r'^/+'), '')
+        .toLowerCase();
+  }
+
+  bool _sameMarkerImage(String? left, String? right) {
+    return _normalizeMarkerPath(left) == _normalizeMarkerPath(right);
+  }
+
+  String _markerSavePath(String path) {
+    final value = path.trim();
+    final parsed = Uri.tryParse(value);
+
+    if (parsed != null && parsed.hasScheme) {
+      return parsed.path.replaceFirst(RegExp(r'^/+'), '');
+    }
+
+    return value
+        .replaceFirst(RegExp(r'^https?://[^/]+', caseSensitive: false), '')
+        .replaceFirst(RegExp(r'^/+'), '');
+  }
+
+  Future<void> _loadLayoutImageSize(String path) async {
+    final provider = NetworkImage(ApiService.fileUrl(path));
+    final stream = provider.resolve(const ImageConfiguration());
+    late ImageStreamListener listener;
+
+    listener = ImageStreamListener(
+      (info, _) {
+        final size = Size(
+          info.image.width.toDouble(),
+          info.image.height.toDouble(),
+        );
+
+        if (mounted) {
+          setState(() => _layoutImageSize = size);
+        }
+
+        stream.removeListener(listener);
+      },
+      onError: (_, __) {
+        stream.removeListener(listener);
+      },
+    );
+
+    stream.addListener(listener);
+  }
 
   @override
   void initState() {
     super.initState();
-    _controller.addListener(_refreshMarkers);
-    _load();
-  }
 
-  void _refreshMarkers() {
-    if (mounted) setState(() {});
+    _load();
   }
 
   @override
@@ -766,7 +841,6 @@ class _AreaTabState extends State<_AreaTab> {
 
   @override
   void dispose() {
-    _controller.removeListener(_refreshMarkers);
     _controller.dispose();
     super.dispose();
   }
@@ -787,9 +861,7 @@ class _AreaTabState extends State<_AreaTab> {
     try {
       final result = await IhmOfflineService.getMarkers(jobId, areaId);
 
-      final jobMarkers = result
-        .where((m) => m.surveyJobId == jobId)
-        .toList();
+      final jobMarkers = result.where((m) => m.surveyJobId == jobId).toList();
 
       if (!mounted || seq != _loadSeq) return;
 
@@ -802,6 +874,9 @@ class _AreaTabState extends State<_AreaTab> {
         markers = _dedupeMarkers(jobMarkers);
         loading = false;
       });
+      if (imagePath != null && !imagePath!.toLowerCase().endsWith('.pdf')) {
+        _loadLayoutImageSize(imagePath!);
+      }
     } catch (_) {
       if (!mounted || seq != _loadSeq) return;
       setState(() => loading = false);
@@ -819,7 +894,7 @@ class _AreaTabState extends State<_AreaTab> {
         continue;
       }
 
-      final key = '$checkpointId|${marker.imagePath}';
+      final key = '$checkpointId|${_normalizeMarkerPath(marker.imagePath)}';
       final existing = byCheckpointAndImage[key];
       if (existing == null || marker.id > existing.id) {
         byCheckpointAndImage[key] = marker;
@@ -831,18 +906,49 @@ class _AreaTabState extends State<_AreaTab> {
 
   Future<void> _saveMarker(TapUpDetails details) async {
     if (imagePath == null || savingMarker) return;
+    if (_layoutImageSize == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please wait until layout image is loaded'),
+          duration: Duration(milliseconds: 900),
+        ),
+      );
+      return;
+    }
+    final box =
+        _layoutImageKey.currentContext?.findRenderObject() as RenderBox?;
 
-    final mapPoint = details.localPosition;
-    final dx = mapPoint.dx.clamp(0.0, mapWidth);
-    final dy = mapPoint.dy.clamp(0.0, mapHeight);
+    if (box == null || !box.hasSize) return;
+
+    final tapPoint = box.globalToLocal(details.globalPosition);
+
+    final imageRect = getFittedImageRect(
+      containerSize: box.size,
+      imageSize: _layoutImageSize!,
+      fit: BoxFit.contain,
+    );
+
+    if (!imageRect.contains(tapPoint)) {
+      return;
+    }
+
+    final localImageX = tapPoint.dx - imageRect.left;
+    final localImageY = tapPoint.dy - imageRect.top;
+
+    final imageX = localImageX / imageRect.width * _layoutImageSize!.width;
+    final imageY = localImageY / imageRect.height * _layoutImageSize!.height;
+
+    final xPercent = (imageX / _layoutImageSize!.width).clamp(0.0, 1.0);
+    final yPercent = (imageY / _layoutImageSize!.height).clamp(0.0, 1.0);
+
     setState(() => savingMarker = true);
 
     try {
       final marker = await IhmOfflineService.saveMarker(
         checkpoint: widget.checkpoint,
-        imagePath: imagePath!,
-        xPercent: dx / mapWidth * 100,
-        yPercent: dy / mapHeight * 100,
+        imagePath: _markerSavePath(imagePath!),
+        xPercent: xPercent,
+        yPercent: yPercent,
       );
 
       final persisted = await IhmOfflineService.getMarkers(
@@ -853,11 +959,11 @@ class _AreaTabState extends State<_AreaTab> {
 
       setState(() {
         markers = _dedupeMarkers([
-      ...persisted.where(
-        (m) => m.surveyJobId == widget.checkpoint.surveyJobId,
-      ),
-      marker,
-    ]);
+          ...persisted.where(
+            (m) => m.surveyJobId == widget.checkpoint.surveyJobId,
+          ),
+          marker,
+        ]);
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -898,10 +1004,10 @@ class _AreaTabState extends State<_AreaTab> {
       if (!mounted) return;
       setState(() {
         markers = _dedupeMarkers(
-        persisted
-            .where((m) => m.surveyJobId == widget.checkpoint.surveyJobId)
-            .toList(),
-      );
+          persisted
+              .where((m) => m.surveyJobId == widget.checkpoint.surveyJobId)
+              .toList(),
+        );
       });
       await AppDialog.success(
         context,
@@ -915,34 +1021,14 @@ class _AreaTabState extends State<_AreaTab> {
   }
 
   List<IhmMarker> get _visibleMarkers => _dedupeMarkers(
-  markers
-      .where(
-        (m) =>
-            m.surveyJobId == widget.checkpoint.surveyJobId &&
-            m.imagePath == imagePath,
-      )
-      .toList(),
-);
-
-  Offset _screenPointFor(IhmMarker marker) {
-    final scenePoint = Offset(
-      marker.xPercent / 100 * mapWidth,
-      marker.yPercent / 100 * mapHeight,
-    );
-
-    return MatrixUtils.transformPoint(_controller.value, scenePoint);
-  }
-
-  List<_PlacedMarker> _placedMarkers() {
-    return _visibleMarkers
-        .map(
-          (marker) => _PlacedMarker(
-            marker: marker,
-            screenPoint: _screenPointFor(marker),
-          ),
+    markers
+        .where(
+          (m) =>
+              m.surveyJobId == widget.checkpoint.surveyJobId &&
+              _sameMarkerImage(m.imagePath, imagePath),
         )
-        .toList();
-  }
+        .toList(),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -990,157 +1076,122 @@ class _AreaTabState extends State<_AreaTab> {
       );
     }
 
-if (imagePath!.toLowerCase().endsWith('.pdf')) {
-  return SfPdfViewer.network(
-    ApiService.fileUrl(imagePath!),
-    canShowScrollHead: true,
-    canShowScrollStatus: true,
-    enableDoubleTapZooming: true,
-  );
-}
+    if (imagePath!.toLowerCase().endsWith('.pdf')) {
+      return SfPdfViewer.network(
+        ApiService.fileUrl(imagePath!),
+        canShowScrollHead: true,
+        canShowScrollStatus: true,
+        enableDoubleTapZooming: true,
+      );
+    }
 
     return Stack(
       children: [
-        InteractiveViewer(
-          transformationController: _controller,
-          minScale: 0.5,
-          maxScale: 5,
-          boundaryMargin: const EdgeInsets.all(300),
-          child: GestureDetector(
-            onTapUp: _saveMarker,
+        Center(
+          child: InteractiveViewer(
+            transformationController: _controller,
+            minScale: 0.5,
+            maxScale: 5,
+            boundaryMargin: const EdgeInsets.all(300),
             child: SizedBox(
+              key: _layoutImageKey,
               width: mapWidth,
               height: mapHeight,
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: Image.network(
-                      ApiService.fileUrl(imagePath!),
-                      fit: BoxFit.fill,
-                      errorBuilder: (_, error, __) => Container(
-                        color: _c.bgCardAlt,
-                        alignment: Alignment.center,
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.broken_image_outlined,
-                              color: _A.accentRed,
-                              size: 42,
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              'Attachment found, but the image could not be opened.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: _c.textPrimary,
-                                fontWeight: FontWeight.w700,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final widgetSize = Size(
+                    constraints.maxWidth,
+                    constraints.maxHeight,
+                  );
+                  final imageSize =
+                      _layoutImageSize ?? Size(mapWidth, mapHeight);
+                  final imageRect = getFittedImageRect(
+                    containerSize: widgetSize,
+                    imageSize: imageSize,
+                    fit: BoxFit.contain,
+                  );
+
+                  return GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTapUp: _saveMarker,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Positioned.fill(
+                          child: Image.network(
+                            ApiService.fileUrl(imagePath!),
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, error, __) => Container(
+                              color: _c.bgCardAlt,
+                              alignment: Alignment.center,
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.broken_image_outlined,
+                                    color: _A.accentRed,
+                                    size: 42,
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    'Attachment found, but the image could not be opened.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: _c.textPrimary,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    ApiService.fileUrl(imagePath!),
+                                    textAlign: TextAlign.center,
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: _c.textSecond,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            const SizedBox(height: 6),
-                            Text(
-                              ApiService.fileUrl(imagePath!),
-                              textAlign: TextAlign.center,
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: _c.textSecond,
-                                fontSize: 10,
-                              ),
-                            ),
-                          ],
+                          ),
                         ),
-                      ),
+                        for (final marker in _visibleMarkers)
+                          Positioned(
+                            left:
+                                imageRect.left +
+                                (_storedPercentToUnit(marker.xPercent) *
+                                    imageRect.width) -
+                                36,
+                            top:
+                                imageRect.top +
+                                (_storedPercentToUnit(marker.yPercent) *
+                                    imageRect.height) -
+                                64,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.deferToChild,
+                              onTapUp: (_) {},
+                              onDoubleTap: () async {
+                                await _deleteMarker(marker);
+                              },
+                              child: _GooglePin(
+                                label: marker.markerLabel ?? '',
+                                active:
+                                    marker.ihmCheckpointId ==
+                                    widget.checkpoint.id,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
-                  ),
-                ],
+                  );
+                },
               ),
             ),
           ),
         ),
-        if (layoutImages.length > 1)
-          Positioned(
-            top: 12,
-            left: 12,
-            right: 12,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: _c.bgCard.withOpacity(0.96),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _c.divider),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: imagePath,
-                  isExpanded: true,
-                  dropdownColor: _c.bgCard,
-                  iconEnabledColor: _A.accent,
-                  items: layoutImages.map((layout) {
-                    final label = layout.isCommon
-                        ? 'Common - ${layout.originalFileName}'
-                        : 'Area - ${layout.originalFileName}';
-                    return DropdownMenuItem(
-                      value: layout.filePath,
-                      child: Text(
-                        label,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: _c.textPrimary, fontSize: 12),
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() => imagePath = value);
-                    _controller.value = Matrix4.identity();
-                  },
-                ),
-              ),
-            ),
-          ),
-        if (layoutImages.isNotEmpty)
-          Positioned(
-            top: layoutImages.length > 1 ? 72 : 12,
-            right: 12,
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: _showLayoutAttachments,
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 9,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _c.bgCard.withOpacity(0.96),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: _c.divider),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.attach_file_rounded,
-                        color: _A.accent,
-                        size: 17,
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        'Attachments (${layoutImages.length})',
-                        style: TextStyle(
-                          color: _c.textPrimary,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
         if (savingMarker)
           Positioned.fill(
             child: IgnorePointer(
@@ -1151,18 +1202,7 @@ if (imagePath!.toLowerCase().endsWith('.pdf')) {
               ),
             ),
           ),
-        for (final placed in _placedMarkers())
-          Positioned(
-            left: placed.screenPoint.dx - 36,
-            top: placed.screenPoint.dy - 56,
-            child: GestureDetector(
-              onDoubleTap: () => _deleteMarker(placed.marker),
-              child: _GooglePin(
-                label: placed.marker.markerLabel ?? '',
-                active: placed.marker.ihmCheckpointId == widget.checkpoint.id,
-              ),
-            ),
-          ),
+
         // ── Hint overlay ──────────────────────────────────────────────────
         Positioned(
           bottom: 16,
@@ -1236,6 +1276,8 @@ if (imagePath!.toLowerCase().endsWith('.pdf')) {
                       onTap: () {
                         setState(() {
                           imagePath = layout.filePath;
+                          _layoutImageSize = null;
+                          _loadLayoutImageSize(layout.filePath);
                         });
 
                         _controller.value = Matrix4.identity();
@@ -1358,47 +1400,47 @@ class _ImagesTabState extends State<_ImagesTab> {
   }
 
   Future<void> _pick(ImageSource source) async {
-  try {
-    setState(() => uploading = true);
+    try {
+      setState(() => uploading = true);
 
-    final List<XFile> files;
-    if (source == ImageSource.gallery) {
-      files = await picker.pickMultiImage(imageQuality: 75);
-    } else {
-      final file = await picker.pickImage(source: source, imageQuality: 75);
-      files = file == null ? <XFile>[] : <XFile>[file];
+      final List<XFile> files;
+      if (source == ImageSource.gallery) {
+        files = await picker.pickMultiImage(imageQuality: 75);
+      } else {
+        final file = await picker.pickImage(source: source, imageQuality: 75);
+        files = file == null ? <XFile>[] : <XFile>[file];
+      }
+
+      if (files.isEmpty) {
+        if (mounted) setState(() => uploading = false);
+        return;
+      }
+
+      final uploadedPhotos = <IhmSamplingPhoto>[];
+
+      for (final file in files) {
+        final bytes = await file.readAsBytes();
+        final uploaded = await IhmOfflineService.saveCheckpointPhoto(
+          checkpoint: widget.checkpoint,
+          fileBytes: bytes,
+          fileName: file.name,
+        );
+        uploadedPhotos.add(uploaded);
+      }
+
+      if (!mounted) return;
+      setState(() {
+        photos.insertAll(0, uploadedPhotos.reversed);
+        uploading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => uploading = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
     }
-
-    if (files.isEmpty) {
-      if (mounted) setState(() => uploading = false);
-      return;
-    }
-
-    final uploadedPhotos = <IhmSamplingPhoto>[];
-
-    for (final file in files) {
-      final bytes = await file.readAsBytes();
-      final uploaded = await IhmOfflineService.saveCheckpointPhoto(
-        checkpoint: widget.checkpoint,
-        fileBytes: bytes,
-        fileName: file.name,
-      );
-      uploadedPhotos.add(uploaded);
-    }
-
-    if (!mounted) return;
-    setState(() {
-      photos.insertAll(0, uploadedPhotos.reversed);
-      uploading = false;
-    });
-  } catch (e) {
-    if (!mounted) return;
-    setState(() => uploading = false);
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(e.toString())));
   }
-}
 
   void _showImageOptions() {
     showModalBottomSheet(
@@ -1547,13 +1589,6 @@ class _ImagesTabState extends State<_ImagesTab> {
       ],
     );
   }
-}
-
-class _PlacedMarker {
-  final IhmMarker marker;
-  final Offset screenPoint;
-
-  const _PlacedMarker({required this.marker, required this.screenPoint});
 }
 
 // ─── Pin Widget ───────────────────────────────────────────────────────────────

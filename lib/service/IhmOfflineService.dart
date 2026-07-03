@@ -321,19 +321,33 @@ class IhmOfflineService {
       'updatedAt': DateTime.now().toIso8601String(),
     };
 
-    final existing = await db.query(
-      'ihm_markers',
-      columns: ['id'],
-      where:
-          'surveyJobId = ? AND ihmAreaId = ? AND ihmCheckpointId = ? AND imagePath = ? AND deleted = 0',
-      whereArgs: [
-        checkpoint.surveyJobId,
-        checkpoint.ihmAreaId,
-        checkpoint.id,
-        imagePath,
-      ],
-      limit: 1,
-    );
+    final existingRows = await db.query(
+  'ihm_markers',
+  columns: ['id', 'imagePath'],
+  where:
+      'surveyJobId = ? AND ihmAreaId = ? AND ihmCheckpointId = ? AND deleted = 0',
+  whereArgs: [
+    checkpoint.surveyJobId,
+    checkpoint.ihmAreaId,
+    checkpoint.id,
+  ],
+);
+
+String norm(String? path) {
+  final value = (path ?? '').trim();
+  final parsed = Uri.tryParse(value);
+  if (parsed != null && parsed.hasScheme) {
+    return parsed.path.replaceFirst(RegExp(r'^/+'), '').toLowerCase();
+  }
+  return value
+      .replaceFirst(RegExp(r'^https?://[^/]+', caseSensitive: false), '')
+      .replaceFirst(RegExp(r'^/+'), '')
+      .toLowerCase();
+}
+
+final existing = existingRows
+    .where((row) => norm(row['imagePath']?.toString()) == norm(imagePath))
+    .toList();
 
     final int localId;
     if (existing.isNotEmpty) {
