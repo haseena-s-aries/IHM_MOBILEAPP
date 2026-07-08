@@ -181,17 +181,14 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
 
   void _showMessage(String message) {
     final normalized = message.replaceFirst('Exception: ', '');
-    final failed = normalized.toLowerCase().contains('fail') ||
+    final failed =
+        normalized.toLowerCase().contains('fail') ||
         normalized.toLowerCase().contains('error') ||
         normalized.toLowerCase().contains('missing');
     if (failed) {
       AppDialog.error(context, message: normalized);
     } else {
-      AppDialog.success(
-        context,
-        title: 'Completed',
-        message: normalized,
-      );
+      AppDialog.success(context, title: 'Completed', message: normalized);
     }
   }
 
@@ -291,8 +288,7 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
     final confirmed = await AppDialog.confirm(
       context,
       title: 'Delete survey job?',
-      message:
-          'Delete ${job.jobNumber}? This action cannot be undone.',
+      message: 'Delete ${job.jobNumber}? This action cannot be undone.',
       confirmLabel: 'Delete job',
       destructive: true,
     );
@@ -313,34 +309,36 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
       await _loadJobs();
     }
   }
-String _formatSurveyDate(DateTime date) {
-  final day = date.day.toString().padLeft(2, '0');
-  final month = date.month.toString().padLeft(2, '0');
-  return '$day-$month-${date.year}';
-}
 
-Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
-  final picked = await showDatePicker(
-    context: context,
-    initialDate: job.surveyDate ?? DateTime.now(),
-    firstDate: DateTime(2000),
-    lastDate: DateTime(2100),
-  );
+  String _formatSurveyDate(DateTime date) {
+    final day = date.day.toString().padLeft(2, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    return '$day-$month-${date.year}';
+  }
 
-  if (picked == null) return;
-
-  try {
-    await ApiService.updateSurveyDate(
-      surveyJobId: job.id,
-      surveyDate: picked,
+  Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: job.surveyDate ?? DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
     );
 
-    _showMessage('Survey date saved successfully.');
-    await _loadJobs();
-  } catch (e) {
-    _showMessage(e.toString());
+    if (picked == null) return;
+
+    try {
+      await ApiService.updateSurveyDate(
+        surveyJobId: job.id,
+        surveyDate: picked,
+      );
+
+      _showMessage('Survey date saved successfully.');
+      await _loadJobs();
+    } catch (e) {
+      _showMessage(e.toString());
+    }
   }
-}
+
   Future<void> _loadJobs() async {
     setState(() {
       isLoading = true;
@@ -1390,8 +1388,7 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
                                         title: 'Search Manager',
                                         items: managers,
                                         selected: assignedManager,
-                                        label: (manager) =>
-                                            manager.displayName,
+                                        label: (manager) => manager.displayName,
                                       );
                                   if (value != null) {
                                     setDialogState(
@@ -1667,7 +1664,8 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
                               ),
                             ),
                             onPressed: () async {
-                              final removingAll = primarySurveyor == null &&
+                              final removingAll =
+                                  primarySurveyor == null &&
                                   secondarySurveyor == null;
                               final confirmed = await AppDialog.confirm(
                                 context,
@@ -1677,8 +1675,9 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
                                 message: removingAll
                                     ? 'Remove all surveyors from ${job.jobNumber}?'
                                     : 'Save the selected primary and secondary surveyors for ${job.jobNumber}?',
-                                confirmLabel:
-                                    removingAll ? 'Remove' : 'Save assignment',
+                                confirmLabel: removingAll
+                                    ? 'Remove'
+                                    : 'Save assignment',
                                 destructive: removingAll,
                               );
                               if (!confirmed || !context.mounted) return;
@@ -1690,14 +1689,12 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
                                 action: () async {
                                   await ApiService.assignSurveyJobSurveyors(
                                     surveyJobId: job.id,
-                                    primarySurveyorUserId:
-                                        primarySurveyor?.id,
+                                    primarySurveyorUserId: primarySurveyor?.id,
                                     secondarySurveyorUserId:
                                         secondarySurveyor?.id,
                                     assignedByUserId: userId,
                                   );
-                                  await ApiService
-                                      .updateSurveyJobAssignedManager(
+                                  await ApiService.updateSurveyJobAssignedManager(
                                     surveyJobId: job.id,
                                     assignedManagerId: assignedManager?.id,
                                   );
@@ -2226,8 +2223,7 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
 
                 const SizedBox(height: 12),
 
-            
-          _buildJobMetaGrid(job),
+                _buildJobMetaGrid(job),
 
                 // ── Action Buttons ──
                 Wrap(
@@ -2281,144 +2277,148 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
       ),
     );
   }
-Widget _buildJobMetaGrid(SurveyJob job) {
-  final primaryName = job.primarySurveyorName;
-  final secondaryName = job.secondarySurveyorName;
 
-  final tiles = <Widget>[
-    _metaTile(
-      label: 'Survey Date',
-      value: job.surveyDate == null
-          ? 'Not selected'
-          : _formatSurveyDate(job.surveyDate!),
-      icon: Icons.calendar_today_outlined,
-      color: _AppColors.ocean,
-      onTap: isAdmin ? null : () => _pickAndSaveSurveyDate(job),
-      actionText: isAdmin ? null : (job.surveyDate == null ? 'Select' : 'Change'),
-    ),
-    if (job.assignedManagerName != null &&
-        job.assignedManagerName!.trim().isNotEmpty)
-      _metaTile(
-        label: 'Assigned Manager',
-        value: job.assignedManagerName!,
-        icon: Icons.admin_panel_settings_outlined,
-        color: _AppColors.purple,
-      ),
-    if (primaryName != null && primaryName.trim().isNotEmpty)
-      _metaTile(
-        label: 'Primary Surveyor',
-        value: primaryName,
-        icon: Icons.person_outline,
-        color: _AppColors.success,
-      ),
-    if (secondaryName != null && secondaryName.trim().isNotEmpty)
-      _metaTile(
-        label: 'Secondary Surveyor',
-        value: secondaryName,
-        icon: Icons.person_outline,
-        color: _AppColors.success,
-      ),
-    if ((primaryName == null || primaryName.trim().isEmpty) &&
-        (secondaryName == null || secondaryName.trim().isEmpty) &&
-        job.assignedSurveyorName != null &&
-        job.assignedSurveyorName!.trim().isNotEmpty)
-      _metaTile(
-        label: 'Surveyor',
-        value: job.assignedSurveyorName!,
-        icon: Icons.person_outline,
-        color: _AppColors.success,
-      ),
-  ];
+  Widget _buildJobMetaGrid(SurveyJob job) {
+    final primaryName = job.primarySurveyorName;
+    final secondaryName = job.secondarySurveyorName;
 
-  return Padding(
-    padding: const EdgeInsets.only(bottom: 12),
-    child: Row(
-      children: [
-        for (int i = 0; i < tiles.length; i++) ...[
-          Expanded(child: tiles[i]),
-          if (i != tiles.length - 1) const SizedBox(width: 8),
-        ],
-      ],
-    ),
-  );
-}
-Widget _metaTile({
-  required String label,
-  required String value,
-  required IconData icon,
-  required Color color,
-  VoidCallback? onTap,
-  String? actionText,
-}) {
-  final content = Container(
-    constraints: const BoxConstraints(minHeight: 62),
-    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
-    decoration: BoxDecoration(
-      color: color.withOpacity(0.08),
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: color.withOpacity(0.2)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, size: 14, color: color),
-            const SizedBox(width: 5),
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 9.5,
-                  color: color,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ],
+    final tiles = <Widget>[
+      _metaTile(
+        label: 'Survey Date',
+        value: job.surveyDate == null
+            ? 'Not selected'
+            : _formatSurveyDate(job.surveyDate!),
+        icon: Icons.calendar_today_outlined,
+        color: _AppColors.ocean,
+        onTap: isAdmin ? null : () => _pickAndSaveSurveyDate(job),
+        actionText: isAdmin
+            ? null
+            : (job.surveyDate == null ? 'Select' : 'Change'),
+      ),
+      if (job.assignedManagerName != null &&
+          job.assignedManagerName!.trim().isNotEmpty)
+        _metaTile(
+          label: 'Assigned Manager',
+          value: job.assignedManagerName!,
+          icon: Icons.admin_panel_settings_outlined,
+          color: _AppColors.purple,
         ),
-        const SizedBox(height: 4),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: color,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            if (actionText != null) ...[
-              const SizedBox(width: 4),
-              Text(
-                actionText,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: color,
-                  fontWeight: FontWeight.w900,
+      if (primaryName != null && primaryName.trim().isNotEmpty)
+        _metaTile(
+          label: 'Primary Surveyor',
+          value: primaryName,
+          icon: Icons.person_outline,
+          color: _AppColors.success,
+        ),
+      if (secondaryName != null && secondaryName.trim().isNotEmpty)
+        _metaTile(
+          label: 'Secondary Surveyor',
+          value: secondaryName,
+          icon: Icons.person_outline,
+          color: _AppColors.success,
+        ),
+      if ((primaryName == null || primaryName.trim().isEmpty) &&
+          (secondaryName == null || secondaryName.trim().isEmpty) &&
+          job.assignedSurveyorName != null &&
+          job.assignedSurveyorName!.trim().isNotEmpty)
+        _metaTile(
+          label: 'Surveyor',
+          value: job.assignedSurveyorName!,
+          icon: Icons.person_outline,
+          color: _AppColors.success,
+        ),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          for (int i = 0; i < tiles.length; i++) ...[
+            Expanded(child: tiles[i]),
+            if (i != tiles.length - 1) const SizedBox(width: 8),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _metaTile({
+    required String label,
+    required String value,
+    required IconData icon,
+    required Color color,
+    VoidCallback? onTap,
+    String? actionText,
+  }) {
+    final content = Container(
+      constraints: const BoxConstraints(minHeight: 62),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    color: color,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
             ],
-          ],
-        ),
-      ],
-    ),
-  );
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              if (actionText != null) ...[
+                const SizedBox(width: 4),
+                Text(
+                  actionText,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: color,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
 
-  if (onTap == null) return content;
+    if (onTap == null) return content;
 
-  return InkWell(
-    borderRadius: BorderRadius.circular(8),
-    onTap: onTap,
-    child: content,
-  );
-}
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: content,
+    );
+  }
 
   Widget _assignmentLine(String label, String name) {
     return Row(

@@ -66,18 +66,14 @@ class SurveyJobOfflineService {
 
         final batch = txn.batch();
         for (final job in jobs) {
-          batch.insert(
-            'survey_jobs_cache',
-            {
-              'id': job.id,
-              'surveyType': surveyType,
-              'userId': scopeUserId,
-              'isAdmin': scopeIsAdmin,
-              'payloadJson': jsonEncode(job.toJson()),
-              'updatedAt': now,
-            },
-            conflictAlgorithm: ConflictAlgorithm.replace,
-          );
+          batch.insert('survey_jobs_cache', {
+            'id': job.id,
+            'surveyType': surveyType,
+            'userId': scopeUserId,
+            'isAdmin': scopeIsAdmin,
+            'payloadJson': jsonEncode(job.toJson()),
+            'updatedAt': now,
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
         }
         await batch.commit(noResult: true);
       });
