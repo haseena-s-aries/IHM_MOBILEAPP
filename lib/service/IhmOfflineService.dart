@@ -8,6 +8,7 @@ import 'package:Auras/service/ihm_photo_storage_stub.dart'
     if (dart.library.io) 'package:Auras/service/ihm_photo_storage_io.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:sqflite/sqflite.dart';
 
 class IhmOfflineService {
@@ -389,7 +390,7 @@ class IhmOfflineService {
           jobId: jobId,
           areaId: areaId,
         );
-        await _cacheLayouts(jobId, layouts);
+        await _cacheLayouts(jobId, areaId, layouts);
       } catch (_) {}
     }
 
@@ -615,7 +616,11 @@ final existing = existingRows
         );
         await _cachePhotos(checkpoint, [uploaded]);
         await syncPendingIhmData();
-        return uploaded;
+        final cachedPhotos = await getLocalCheckpointPhotos(checkpoint.id);
+        return cachedPhotos.firstWhere(
+          (photo) => photo.id == uploaded.id,
+          orElse: () => uploaded,
+        );
       } catch (_) {
         // Keep the photo locally if the device has a network but the API call fails.
       }
@@ -897,6 +902,27 @@ final existing = existingRows
   ) async {
     final db = await DatabaseHelper.instance.database;
     for (final photo in photos) {
+      final existing = await db.query(
+        'ihm_sampling_photos',
+        columns: ['filePath', 'localFilePath'],
+        where: 'id = ?',
+        whereArgs: [photo.id],
+        limit: 1,
+      );
+      final existingFilePath = existing.isEmpty
+          ? null
+          : existing.first['filePath']?.toString();
+      final existingLocalPath =
+          existingFilePath == photo.filePath && existing.isNotEmpty
+          ? existing.first['localFilePath']?.toString()
+          : null;
+      final localPath = await _ensureCachedRemoteFile(
+        remotePath: photo.filePath,
+        existingLocalPath: existingLocalPath,
+        fallbackFileName: 'checkpoint_photo_${photo.id}.jpg',
+        folderName: 'ihm_sampling_photos',
+      );
+
       await db.insert(
         'ihm_sampling_photos',
         photo.toLocalMap(
@@ -904,18 +930,60 @@ final existing = existingRows
           checkpointId: checkpoint.id,
           areaId: checkpoint.ihmAreaId,
           localId: photo.id,
+          localFilePath: localPath,
         ),
-        conflictAlgorithm: ConflictAlgorithm.ignore,
+        conflictAlgorithm: ConflictAlgorithm.replace,
       );
     }
   }
 
   static Future<void> _cacheLayouts(
     int jobId,
+    int areaId,
     List<IhmLayoutImage> layouts,
   ) async {
     final db = await DatabaseHelper.instance.database;
+    final layoutIds = layouts.map((layout) => layout.id).toSet();
+    if (layoutIds.isEmpty) {
+      await db.delete(
+        'ihm_layout_images',
+        where: 'surveyJobId = ? AND (ihmAreaId = ? OR isCommon = 1)',
+        whereArgs: [jobId, areaId],
+      );
+    } else {
+      final placeholders = layoutIds.map((_) => '?').join(',');
+      await db.delete(
+        'ihm_layout_images',
+        where:
+            'surveyJobId = ? AND (ihmAreaId = ? OR isCommon = 1) AND id NOT IN ($placeholders)',
+        whereArgs: [jobId, areaId, ...layoutIds],
+      );
+    }
+
     for (final layout in layouts) {
+      final existing = await db.query(
+        'ihm_layout_images',
+        columns: ['filePath', 'localFilePath'],
+        where: 'id = ?',
+        whereArgs: [layout.id],
+        limit: 1,
+      );
+      final existingFilePath = existing.isEmpty
+          ? null
+          : existing.first['filePath']?.toString();
+      final existingLocalPath =
+          existingFilePath == layout.filePath && existing.isNotEmpty
+          ? existing.first['localFilePath']?.toString()
+          : null;
+      final localPath = await _ensureCachedRemoteFile(
+        remotePath: layout.filePath,
+        existingLocalPath: existingLocalPath,
+        fallbackFileName: layout.originalFileName.isEmpty
+            ? 'layout_${layout.id}.jpg'
+            : layout.originalFileName,
+        folderName: 'ihm_layout_images',
+      );
+
       await db.insert(
         'ihm_layout_images',
         {
@@ -923,6 +991,7 @@ final existing = existingRows
           'surveyJobId': jobId,
           'ihmAreaId': layout.ihmAreaId,
           'filePath': layout.filePath,
+          'localFilePath': localPath,
           'originalFileName': layout.originalFileName,
           'contentType': layout.contentType,
           'isCommon': layout.isCommon ? 1 : 0,
@@ -1065,6 +1134,7 @@ final existing = existingRows
       originalFileName: row['originalFileName']?.toString() ?? 'Layout',
       contentType: row['contentType']?.toString(),
       isCommon: _int(row['isCommon']) == 1,
+      localFilePath: row['localFilePath']?.toString(),
     );
   }
 
@@ -1095,4 +1165,55 @@ final existing = existingRows
 
   static double _double(Object? value) =>
       double.tryParse(value?.toString() ?? '') ?? 0;
+
+  static Future<String?> _ensureCachedRemoteFile({
+    required String remotePath,
+    required String? existingLocalPath,
+    required String fallbackFileName,
+    required String folderName,
+  }) async {
+    if (remotePath.trim().isEmpty || remotePath.toLowerCase().endsWith('.pdf')) {
+      return existingLocalPath;
+    }
+
+    if (existingLocalPath != null &&
+        existingLocalPath.isNotEmpty &&
+        await _canReadLocalFile(existingLocalPath)) {
+      return existingLocalPath;
+    }
+
+    try {
+      final response = await http.get(Uri.parse(ApiService.fileUrl(remotePath)));
+      if (response.statusCode < 200 ||
+          response.statusCode >= 300 ||
+          response.bodyBytes.isEmpty) {
+        return existingLocalPath;
+      }
+
+      return writeIhmLocalFile(
+        response.bodyBytes,
+        _remoteFileName(remotePath, fallbackFileName),
+        folderName: folderName,
+      );
+    } catch (_) {
+      return existingLocalPath;
+    }
+  }
+
+  static Future<bool> _canReadLocalFile(String path) async {
+    try {
+      final bytes = await readIhmLocalPhoto(path);
+      return bytes.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static String _remoteFileName(String remotePath, String fallbackFileName) {
+    final parsed = Uri.tryParse(remotePath);
+    final name = parsed == null || parsed.pathSegments.isEmpty
+        ? ''
+        : parsed.pathSegments.last;
+    return name.trim().isEmpty ? fallbackFileName : name;
+  }
 }

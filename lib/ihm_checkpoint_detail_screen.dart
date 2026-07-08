@@ -773,6 +773,46 @@ class _AreaTabState extends State<_AreaTab> {
     return _normalizeMarkerPath(left) == _normalizeMarkerPath(right);
   }
 
+  IhmLayoutImage? _layoutForPath(String? path) {
+    if (path == null) return null;
+    for (final layout in layoutImages) {
+      if (_sameMarkerImage(layout.filePath, path)) {
+        return layout;
+      }
+    }
+    return null;
+  }
+
+  String? _localLayoutPath(String? path) {
+    final localPath = _layoutForPath(path)?.localFilePath;
+    if (localPath == null || localPath.trim().isEmpty) return null;
+    final file = File(localPath);
+    return file.existsSync() ? localPath : null;
+  }
+
+  ImageProvider _layoutImageProvider(String path) {
+    final localPath = _localLayoutPath(path);
+    if (localPath != null) {
+      return FileImage(File(localPath));
+    }
+    return NetworkImage(ApiService.fileUrl(path));
+  }
+
+  Widget _offlineImagePlaceholder({double? width, double? height}) {
+    return Container(
+      width: width,
+      height: height,
+      color: _c.bgCardAlt,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.all(10),
+      child: Text(
+        'Image not available offline.\nPlease sync online once.',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: _c.textSecond, fontSize: 11),
+      ),
+    );
+  }
+
   String _markerSavePath(String path) {
     final value = path.trim();
     final parsed = Uri.tryParse(value);
@@ -787,7 +827,7 @@ class _AreaTabState extends State<_AreaTab> {
   }
 
   Future<void> _loadLayoutImageSize(String path) async {
-    final provider = NetworkImage(ApiService.fileUrl(path));
+    final provider = _layoutImageProvider(path);
     final stream = provider.resolve(const ImageConfiguration());
     late ImageStreamListener listener;
 
@@ -1120,8 +1160,8 @@ class _AreaTabState extends State<_AreaTab> {
                       clipBehavior: Clip.none,
                       children: [
                         Positioned.fill(
-                          child: Image.network(
-                            ApiService.fileUrl(imagePath!),
+                          child: Image(
+                            image: _layoutImageProvider(imagePath!),
                             fit: BoxFit.contain,
                             errorBuilder: (_, error, __) => Container(
                               color: _c.bgCardAlt,
@@ -1146,7 +1186,8 @@ class _AreaTabState extends State<_AreaTab> {
                                   ),
                                   const SizedBox(height: 6),
                                   Text(
-                                    ApiService.fileUrl(imagePath!),
+                                    _localLayoutPath(imagePath!) ??
+                                        ApiService.fileUrl(imagePath!),
                                     textAlign: TextAlign.center,
                                     maxLines: 3,
                                     overflow: TextOverflow.ellipsis,
@@ -1307,20 +1348,16 @@ class _AreaTabState extends State<_AreaTab> {
                                   color: _A.accentRed,
                                 ),
                               )
-                            : Image.network(
-                                ApiService.fileUrl(layout.filePath),
+                            : Image(
+                                image: _layoutImageProvider(layout.filePath),
                                 width: 58,
                                 height: 48,
                                 fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Container(
-                                  width: 58,
-                                  height: 48,
-                                  color: _c.divider,
-                                  child: const Icon(
-                                    Icons.broken_image_outlined,
-                                    color: _A.accentRed,
-                                  ),
-                                ),
+                                errorBuilder: (_, __, ___) =>
+                                    _offlineImagePlaceholder(
+                                      width: 58,
+                                      height: 48,
+                                    ),
                               ),
                       ),
 
@@ -1520,7 +1557,11 @@ class _ImagesTabState extends State<_ImagesTab> {
       );
     }
 
-    return Image.network(ApiService.fileUrl(photo.filePath), fit: BoxFit.cover);
+    return Image.network(
+      ApiService.fileUrl(photo.filePath),
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => _offlinePhotoPlaceholder(),
+    );
   }
 
   Widget _brokenPhoto() {
@@ -1528,6 +1569,19 @@ class _ImagesTabState extends State<_ImagesTab> {
       color: _c.bgCardAlt,
       alignment: Alignment.center,
       child: const Icon(Icons.broken_image_outlined, color: _A.accentRed),
+    );
+  }
+
+  Widget _offlinePhotoPlaceholder() {
+    return Container(
+      color: _c.bgCardAlt,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.all(10),
+      child: Text(
+        'Image not available offline.\nPlease sync online once.',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: _c.textSecond, fontSize: 11),
+      ),
     );
   }
 

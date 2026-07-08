@@ -213,7 +213,7 @@ class _IHMSurveyScreenState extends State<IHMSurveyScreen>
 
               const SizedBox(height: 32),
 
-              _sectionLabel("DATA VALIDATION"),
+              _sectionLabel("SURVEY COMPLETENESS"),
               const SizedBox(height: 14),
               _buildValidationPanel(),
 
@@ -656,9 +656,12 @@ class _IHMSurveyScreenState extends State<IHMSurveyScreen>
               const Spacer(),
               ElevatedButton.icon(
                 onPressed: _loadingAuditStats ? null : _refreshAuditStats,
-                icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
+                icon: const Icon(
+                  Icons.refresh_rounded,
+                  size: 18,
+                ), // changed from check_circle_outline_rounded
                 label: const Text(
-                  "Validate",
+                  "Refresh",
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                 ),
                 style: ElevatedButton.styleFrom(

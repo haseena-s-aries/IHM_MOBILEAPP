@@ -29,7 +29,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -186,6 +186,32 @@ class DatabaseHelper {
     if (oldVersion < 6) {
       await _createSurveyJobCacheTables(db);
     }
+
+    if (oldVersion >= 4 && oldVersion < 7) {
+      await _addColumnIfMissing(
+        db,
+        tableName: 'ihm_layout_images',
+        columnName: 'localFilePath',
+        definition: 'TEXT',
+      );
+    }
+  }
+
+  Future<void> _addColumnIfMissing(
+    Database db, {
+    required String tableName,
+    required String columnName,
+    required String definition,
+  }) async {
+    final columns = await db.rawQuery('PRAGMA table_info($tableName)');
+    final exists = columns.any(
+      (column) =>
+          column['name']?.toString().toLowerCase() ==
+          columnName.toLowerCase(),
+    );
+    if (!exists) {
+      await db.execute('ALTER TABLE $tableName ADD COLUMN $columnName $definition');
+    }
   }
 
   Future<void> _createSurveyJobCacheTables(Database db) async {
@@ -291,6 +317,7 @@ class DatabaseHelper {
         surveyJobId INTEGER NOT NULL,
         ihmAreaId INTEGER,
         filePath TEXT,
+        localFilePath TEXT,
         originalFileName TEXT,
         contentType TEXT,
         isCommon INTEGER DEFAULT 0,

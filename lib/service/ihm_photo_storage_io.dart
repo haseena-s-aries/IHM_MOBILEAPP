@@ -4,9 +4,13 @@ import 'dart:typed_data';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-Future<String> writeIhmLocalPhoto(Uint8List bytes, String fileName) async {
+Future<String> writeIhmLocalFile(
+  Uint8List bytes,
+  String fileName, {
+  String folderName = 'ihm_sampling_photos',
+}) async {
   final directory = await getApplicationDocumentsDirectory();
-  final photosDirectory = Directory(p.join(directory.path, 'ihm_sampling_photos'));
+  final photosDirectory = Directory(p.join(directory.path, folderName));
 
   if (!await photosDirectory.exists()) {
     await photosDirectory.create(recursive: true);
@@ -24,6 +28,10 @@ Future<String> writeIhmLocalPhoto(Uint8List bytes, String fileName) async {
 
   await savedFile.writeAsBytes(bytes, flush: true);
   return savedFile.path;
+}
+
+Future<String> writeIhmLocalPhoto(Uint8List bytes, String fileName) async {
+  return writeIhmLocalFile(bytes, fileName);
 }
 
 Future<Uint8List> readIhmLocalPhoto(String path) async {
