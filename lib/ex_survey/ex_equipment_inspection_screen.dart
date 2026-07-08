@@ -1,5 +1,7 @@
+import 'dart:io';
+
 import 'package:Auras/ex_survey/ex_survey_models.dart';
-import 'package:Auras/ex_survey/ex_survey_service.dart';
+import 'package:Auras/ex_survey/ex_survey_offline_service.dart';
 import 'package:Auras/utils/app_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -48,8 +50,8 @@ class _ExEquipmentInspectionScreenState
     setState(() => _loadingChecklist = true);
     try {
       final values = await Future.wait([
-        ExSurveyService.fetchQuestions(_inspectionType),
-        ExSurveyService.fetchAnswers(widget.equipment.id, _inspectionType),
+        ExSurveyOfflineService.fetchQuestions(_inspectionType),
+        ExSurveyOfflineService.fetchAnswers(widget.equipment.id, _inspectionType),
       ]);
       final questions = values[0] as List<ExChecklistQuestion>;
       final answers = values[1] as List<ExChecklistAnswer>;
@@ -86,8 +88,8 @@ class _ExEquipmentInspectionScreenState
     setState(() => _loadingEvidence = true);
     try {
       final values = await Future.wait([
-        ExSurveyService.fetchDefects(widget.equipment.surveyJobId),
-        ExSurveyService.fetchPhotos(
+        ExSurveyOfflineService.fetchDefects(widget.equipment.surveyJobId),
+        ExSurveyOfflineService.fetchPhotos(
           widget.equipment.surveyJobId,
           equipmentId: widget.equipment.id,
         ),
@@ -120,7 +122,7 @@ class _ExEquipmentInspectionScreenState
     }
 
     try {
-      await ExSurveyService.saveAnswer(
+      await ExSurveyOfflineService.saveAnswer(
         equipmentId: widget.equipment.id,
         questionId: question.id,
         result: result,
@@ -219,7 +221,7 @@ class _ExEquipmentInspectionScreenState
     if (payload == null) return;
 
     try {
-      await ExSurveyService.createDefect(
+      await ExSurveyOfflineService.createDefect(
         equipmentId: widget.equipment.id,
         defectNumber: payload['defectNumber'],
         description: payload['description']!,
@@ -235,7 +237,7 @@ class _ExEquipmentInspectionScreenState
 
   Future<void> _setDefectStatus(ExDefect defect, String status) async {
     try {
-      await ExSurveyService.updateDefectStatus(defect.id, status);
+      await ExSurveyOfflineService.updateDefectStatus(defect.id, status);
       await _loadEvidence();
     } catch (error) {
       if (mounted) _message(error.toString(), error: true);
@@ -251,7 +253,7 @@ class _ExEquipmentInspectionScreenState
     if (image == null) return;
 
     try {
-      await ExSurveyService.uploadPhoto(
+      await ExSurveyOfflineService.uploadPhoto(
         jobId: widget.equipment.surveyJobId,
         equipmentId: widget.equipment.id,
         bytes: await image.readAsBytes(),
@@ -638,14 +640,7 @@ class _ExEquipmentInspectionScreenState
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      Image.network(
-                        ExSurveyService.publicUrl(photo.filePath),
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
-                          color: Colors.blueGrey.shade100,
-                          child: const Icon(Icons.broken_image_outlined),
-                        ),
-                      ),
+                      _photoImage(photo),
                       Positioned(
                         left: 0,
                         right: 0,
@@ -693,6 +688,30 @@ class _ExEquipmentInspectionScreenState
           ),
         ],
       ),
+    );
+  }
+
+  Widget _photoImage(ExSurveyPhoto photo) {
+    final localPath = photo.localFilePath;
+    if (localPath != null && localPath.isNotEmpty) {
+      return Image.file(
+        File(localPath),
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _brokenImage(),
+      );
+    }
+
+    return Image.network(
+      ExSurveyOfflineService.publicUrl(photo.filePath),
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => _brokenImage(),
+    );
+  }
+
+  Widget _brokenImage() {
+    return Container(
+      color: Colors.blueGrey.shade100,
+      child: const Icon(Icons.broken_image_outlined),
     );
   }
 }

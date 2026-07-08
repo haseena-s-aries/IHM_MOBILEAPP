@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:Auras/ex_survey/ex_equipment_inspection_screen.dart';
 import 'package:Auras/ex_survey/ex_survey_models.dart';
-import 'package:Auras/ex_survey/ex_survey_service.dart';
+import 'package:Auras/ex_survey/ex_survey_offline_service.dart';
 import 'package:Auras/utils/app_dialog.dart';
 import 'package:Auras/model/survey_job.dart';
 import 'package:file_picker/file_picker.dart';
@@ -54,10 +54,10 @@ class _ExSurveyScreenState extends State<ExSurveyScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final values = await Future.wait([
-        ExSurveyService.fetchSummary(widget.job.id),
-        ExSurveyService.fetchEquipment(widget.job.id),
-        ExSurveyService.fetchDefects(widget.job.id),
-        ExSurveyService.fetchDocuments(widget.job.id),
+        // ExSurveyOfflineService.fetchSummary(widget.job.id),
+        ExSurveyOfflineService.fetchEquipment(widget.job.id),
+        ExSurveyOfflineService.fetchDefects(widget.job.id),
+        ExSurveyOfflineService.fetchDocuments(widget.job.id),
       ]);
       if (!mounted) return;
       final summary = values[0] as ExSurveySummary;
@@ -123,17 +123,9 @@ class _ExSurveyScreenState extends State<ExSurveyScreen> {
                 _field(area, 'Area *', Icons.grid_view_outlined),
                 _field(location, 'Location', Icons.location_on_outlined),
                 _field(type, 'Equipment type', Icons.category_outlined),
-                _field(
-                  description,
-                  'Description',
-                  Icons.description_outlined,
-                ),
+                _field(description, 'Description', Icons.description_outlined),
                 _field(rfid, 'RFID tag (optional)', Icons.nfc_outlined),
-                _field(
-                  manufacturer,
-                  'Manufacturer',
-                  Icons.factory_outlined,
-                ),
+                _field(manufacturer, 'Manufacturer', Icons.factory_outlined),
                 _field(model, 'Model', Icons.memory_outlined),
                 _field(serial, 'Serial number', Icons.numbers),
               ],
@@ -147,8 +139,7 @@ class _ExSurveyScreenState extends State<ExSurveyScreen> {
           ),
           FilledButton(
             onPressed: () {
-              if (equipmentId.text.trim().isEmpty ||
-                  area.text.trim().isEmpty) {
+              if (equipmentId.text.trim().isEmpty || area.text.trim().isEmpty) {
                 return;
               }
               Navigator.pop(dialogContext, {
@@ -184,7 +175,7 @@ class _ExSurveyScreenState extends State<ExSurveyScreen> {
     if (payload == null) return;
 
     try {
-      await ExSurveyService.createEquipment(widget.job.id, payload);
+      await ExSurveyOfflineService.createEquipment(widget.job.id, payload);
       await _load();
       if (mounted) _message('Equipment added.');
     } catch (error) {
@@ -192,19 +183,12 @@ class _ExSurveyScreenState extends State<ExSurveyScreen> {
     }
   }
 
-  Widget _field(
-    TextEditingController controller,
-    String label,
-    IconData icon,
-  ) {
+  Widget _field(TextEditingController controller, String label, IconData icon) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextField(
         controller: controller,
-        decoration: InputDecoration(
-          labelText: label,
-          prefixIcon: Icon(icon),
-        ),
+        decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),
       ),
     );
   }
@@ -257,7 +241,7 @@ class _ExSurveyScreenState extends State<ExSurveyScreen> {
     if (file?.bytes == null) return;
 
     try {
-      await ExSurveyService.uploadDocument(
+      await ExSurveyOfflineService.uploadDocument(
         jobId: widget.job.id,
         documentType: documentType,
         bytes: file!.bytes!,
@@ -286,7 +270,12 @@ class _ExSurveyScreenState extends State<ExSurveyScreen> {
   }
 
   Future<void> _openDocument(ExSurveyDocument document) async {
-    final uri = Uri.parse(ExSurveyService.publicUrl(document.filePath));
+    if (document.localFilePath != null && document.localFilePath!.isNotEmpty) {
+      await OpenFile.open(document.localFilePath!);
+      return;
+    }
+
+    final uri = Uri.parse(ExSurveyOfflineService.publicUrl(document.filePath));
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       if (mounted) _message('Could not open the document.', error: true);
     }
@@ -341,7 +330,9 @@ class _ExSurveyScreenState extends State<ExSurveyScreen> {
                           color: _blue,
                         ),
                         title: Text(document.originalFileName),
-                        subtitle: Text(_documentTypeLabel(document.documentType)),
+                        subtitle: Text(
+                          _documentTypeLabel(document.documentType),
+                        ),
                         trailing: const Icon(Icons.open_in_new),
                         onTap: () => _openDocument(document),
                       );
@@ -402,8 +393,7 @@ class _ExSurveyScreenState extends State<ExSurveyScreen> {
                                     : Colors.green,
                               ),
                               title: Text(
-                                defect.defectNumber ??
-                                    'Finding #${defect.id}',
+                                defect.defectNumber ?? 'Finding #${defect.id}',
                               ),
                               subtitle: Text(
                                 '${defect.equipmentCode ?? "Equipment"}\n${defect.description}',
@@ -424,7 +414,7 @@ class _ExSurveyScreenState extends State<ExSurveyScreen> {
 
   Future<void> _submitForQc() async {
     try {
-      await ExSurveyService.submitForQc(widget.job.id);
+      await ExSurveyOfflineService.submitForQc(widget.job.id);
       await _load();
       if (mounted) _message('Inspection submitted for QC review.');
     } catch (error) {
@@ -434,10 +424,12 @@ class _ExSurveyScreenState extends State<ExSurveyScreen> {
 
   Future<void> _review(String status) async {
     try {
-      await ExSurveyService.review(widget.job.id, status);
+      await ExSurveyOfflineService.review(widget.job.id, status);
       await _load();
       if (mounted) {
-        _message(status == 'Approved' ? 'Survey approved.' : 'Survey returned.');
+        _message(
+          status == 'Approved' ? 'Survey approved.' : 'Survey returned.',
+        );
       }
     } catch (error) {
       if (mounted) _message(error.toString(), error: true);
@@ -447,7 +439,7 @@ class _ExSurveyScreenState extends State<ExSurveyScreen> {
   Future<void> _generateReport() async {
     try {
       _message('Preparing Ex-Survey report...');
-      final bytes = await ExSurveyService.generateReport(widget.job.id);
+      final bytes = await ExSurveyOfflineService.generateReport(widget.job.id);
       final directory = await getTemporaryDirectory();
       final safeJob = widget.job.jobNumber.replaceAll(
         RegExp(r'[^A-Za-z0-9_-]'),
@@ -466,11 +458,7 @@ class _ExSurveyScreenState extends State<ExSurveyScreen> {
     if (error) {
       AppDialog.error(context, message: value);
     } else {
-      AppDialog.success(
-        context,
-        title: 'Completed',
-        message: value,
-      );
+      AppDialog.success(context, title: 'Completed', message: value);
     }
   }
 
@@ -585,9 +573,12 @@ class _ExSurveyScreenState extends State<ExSurveyScreen> {
           const SizedBox(height: 10),
           Text(
             [
-              widget.job.clientName,
-              widget.job.vesselName ?? widget.job.siteName,
-            ].whereType<String>().where((value) => value.isNotEmpty).join(' | '),
+                  widget.job.clientName,
+                  widget.job.vesselName ?? widget.job.siteName,
+                ]
+                .whereType<String>()
+                .where((value) => value.isNotEmpty)
+                .join(' | '),
             style: const TextStyle(color: Colors.white70),
           ),
         ],
@@ -662,10 +653,7 @@ class _ExSurveyScreenState extends State<ExSurveyScreen> {
                 ),
                 Text(
                   label,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Colors.blueGrey,
-                  ),
+                  style: const TextStyle(fontSize: 11, color: Colors.blueGrey),
                 ),
               ],
             ),

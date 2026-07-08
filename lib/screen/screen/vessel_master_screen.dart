@@ -1,9 +1,9 @@
-import 'package:Auras/model/vessel.dart';
+﻿import 'package:Auras/model/vessel.dart';
 import 'package:Auras/service/api_service.dart';
 import 'package:Auras/utils/app_dialog.dart';
 import 'package:flutter/material.dart';
 
-// ─── Color Palette ───────────────────────────────────────────────────────────
+// â”€â”€â”€ Color Palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _AppColors {
   static const Color navy = Color(0xFF0B1D33);
   static const Color deepBlue = Color(0xFF132B4A);
@@ -80,7 +80,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
     }).toList();
   }
 
-  // ─── Create Dialog ──────────────────────────────────────────────────────────
+  // â”€â”€â”€ Create Dialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Future<void> _showCreateDialog() async {
     final vesselName = TextEditingController();
     final vesselType = TextEditingController();
@@ -118,7 +118,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // ── Dialog Header ──
+                // â”€â”€ Dialog Header â”€â”€
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 24,
@@ -167,7 +167,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
                   ),
                 ),
 
-                // ── Dialog Body ──
+                // â”€â”€ Dialog Body â”€â”€
                 Flexible(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
@@ -191,10 +191,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
                         _sectionLabel('BUILD & REGISTRATION'),
                         _dialogRow([
                           _dialogField(builderName, 'Builder'),
-                          _dialogField(
-                            dateOfBuild,
-                            'Date of Build (yyyy-MM-dd)',
-                          ),
+                          _dialogDateField(dateOfBuild, 'Date of Build'),
                         ]),
                         _dialogRow([
                           _dialogField(portOfRegistry, 'Port of Registry'),
@@ -229,7 +226,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
                   ),
                 ),
 
-                // ── Dialog Actions ──
+                // â”€â”€ Dialog Actions â”€â”€
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 24,
@@ -299,7 +296,9 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
                                 imoNumber: imo.text.trim(),
                                 officialNumber: officialNumber.text.trim(),
                                 builder: builderName.text.trim(),
-                                dateOfBuild: dateOfBuild.text.trim(),
+                                dateOfBuild: _dateDisplayToApi(
+                                  dateOfBuild.text,
+                                ),
                                 portOfRegistry: portOfRegistry.text.trim(),
                                 flag: flag.text.trim(),
                                 lengthOverall: _toDouble(loa.text),
@@ -339,7 +338,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
     if (created == true) _loadVessels();
   }
 
-  // ─── Dialog Helpers ─────────────────────────────────────────────────────────
+  // â”€â”€â”€ Dialog Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Widget _sectionLabel(String text) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10, top: 4),
@@ -368,6 +367,53 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
             )
             .toList(),
       ),
+    );
+  }
+
+  Widget _dialogDateField(TextEditingController controller, String label) {
+    return TextField(
+      controller: controller,
+      readOnly: true,
+      style: const TextStyle(fontSize: 14, color: _AppColors.textPrimary),
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: 'dd-MM-yyyy',
+        suffixIcon: const Icon(Icons.calendar_today_rounded, size: 18),
+        labelStyle: const TextStyle(
+          fontSize: 13,
+          color: _AppColors.textSecondary,
+        ),
+        filled: true,
+        fillColor: _AppColors.surface,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: _AppColors.divider),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: _AppColors.divider),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: _AppColors.ocean, width: 1.5),
+        ),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 14,
+        ),
+      ),
+      onTap: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: _parseDisplayDate(controller.text) ?? DateTime.now(),
+          firstDate: DateTime(1800),
+          lastDate: DateTime(DateTime.now().year + 5),
+        );
+        if (picked != null) {
+          controller.text = _dateToDisplay(picked);
+        }
+      },
     );
   }
 
@@ -475,12 +521,54 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
   }
 
   String _val(String? value) {
-    if (value == null || value.trim().isEmpty) return '—';
+    if (value == null || value.trim().isEmpty) return 'â€”';
     return value.trim();
   }
 
+  String _displayDateValue(String? value) {
+    if (value == null || value.trim().isEmpty) return '---';
+    return _dateToDisplay(_parseApiDate(value) ?? _parseDisplayDate(value));
+  }
+
+  String? _dateDisplayToApi(String value) {
+    if (value.trim().isEmpty) return null;
+    final parsed = _parseDisplayDate(value) ?? _parseApiDate(value);
+    if (parsed == null) return value.trim();
+    return _dateToApi(parsed);
+  }
+
+  DateTime? _parseApiDate(String value) {
+    final text = value.trim();
+    if (text.isEmpty) return null;
+    return DateTime.tryParse(text);
+  }
+
+  DateTime? _parseDisplayDate(String value) {
+    final text = value.trim();
+    final parts = text.split('-');
+    if (parts.length != 3) return null;
+    final day = int.tryParse(parts[0]);
+    final month = int.tryParse(parts[1]);
+    final year = int.tryParse(parts[2]);
+    if (day == null || month == null || year == null) return null;
+    return DateTime(year, month, day);
+  }
+
+  String _dateToDisplay(DateTime? value) {
+    if (value == null) return '---';
+    final day = value.day.toString().padLeft(2, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    return '$day-$month-${value.year}';
+  }
+
+  String _dateToApi(DateTime value) {
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+    return '${value.year}-$month-$day';
+  }
+
   String _numVal(double? value) {
-    if (value == null) return '—';
+    if (value == null) return 'â€”';
     return value % 1 == 0 ? value.toInt().toString() : value.toStringAsFixed(2);
   }
 
@@ -506,7 +594,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
     return Icons.directions_boat_filled;
   }
 
-  // ─── Build ──────────────────────────────────────────────────────────────────
+  // â”€â”€â”€ Build â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -546,7 +634,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Row 1: Back | Icon | Title ──
+          // â”€â”€ Row 1: Back | Icon | Title â”€â”€
           Row(
             children: [
               Material(
@@ -608,7 +696,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
 
           const SizedBox(height: 12),
 
-          // ── Row 2: Stats capsule | Refresh | Add Vessel ──
+          // â”€â”€ Row 2: Stats capsule | Refresh | Add Vessel â”€â”€
           Row(
             children: [
               if (!isLoading && errorMessage == null)
@@ -651,7 +739,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
 
           const SizedBox(height: 14),
 
-          // ── Search Bar ──
+          // â”€â”€ Search Bar â”€â”€
           Container(
             decoration: BoxDecoration(
               color: Colors.white.withOpacity(0.1),
@@ -663,7 +751,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
               style: const TextStyle(color: Colors.white, fontSize: 14),
               onChanged: (val) => setState(() => _searchQuery = val),
               decoration: InputDecoration(
-                hintText: 'Search by name, IMO, flag, type, call sign…',
+                hintText: 'Search by name, IMO, flag, type, call signâ€¦',
                 hintStyle: TextStyle(color: Colors.white.withOpacity(0.35)),
                 prefixIcon: Icon(
                   Icons.search,
@@ -742,7 +830,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
     );
   }
 
-  // ─── Body ───────────────────────────────────────────────────────────────────
+  // â”€â”€â”€ Body â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Widget _buildBody() {
     if (isLoading) {
       return const Center(
@@ -755,7 +843,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
             ),
             SizedBox(height: 16),
             Text(
-              'Loading vessels…',
+              'Loading vesselsâ€¦',
               style: TextStyle(color: _AppColors.textMuted, fontSize: 14),
             ),
           ],
@@ -842,7 +930,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
       );
     }
 
-    // ── 2-Column Grid ──
+    // â”€â”€ 2-Column Grid â”€â”€
     return LayoutBuilder(
       builder: (context, constraints) {
         final crossAxisCount = constraints.maxWidth > 900
@@ -865,7 +953,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
     );
   }
 
-  // ─── Vessel Card ────────────────────────────────────────────────────────────
+  // â”€â”€â”€ Vessel Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Widget _vesselCard(Vessel vessel) {
     return Container(
       decoration: BoxDecoration(
@@ -891,7 +979,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── Card Header ──
+                // â”€â”€ Card Header â”€â”€
                 Row(
                   children: [
                     Container(
@@ -966,7 +1054,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
                 Divider(color: _AppColors.divider.withOpacity(0.5), height: 1),
                 const SizedBox(height: 14),
 
-                // ── Key Info Grid ──
+                // â”€â”€ Key Info Grid â”€â”€
                 Expanded(
                   child: Column(
                     children: [
@@ -997,7 +1085,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
                   ),
                 ),
 
-                // ── Bottom Metrics ──
+                // â”€â”€ Bottom Metrics â”€â”€
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 10,
@@ -1107,7 +1195,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
     return Container(width: 1, height: 22, color: _AppColors.divider);
   }
 
-  // ─── Vessel Detail Sheet ────────────────────────────────────────────────────
+  // â”€â”€â”€ Vessel Detail Sheet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Widget _cardActionButton({
     required IconData icon,
     required String label,
@@ -1256,7 +1344,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
 
                   _detailSection('Build & Registration', [
                     _detailItem('Builder', _val(vessel.builder)),
-                    _detailItem('Date of Build', _val(vessel.dateOfBuild)),
+                    _detailItem('Date of Build', _displayDateValue(vessel.dateOfBuild)),
                     _detailItem(
                       'Port of Registry',
                       _val(vessel.portOfRegistry),
@@ -1373,3 +1461,5 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
     );
   }
 }
+
+

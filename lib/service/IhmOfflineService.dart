@@ -41,8 +41,20 @@ class IhmOfflineService {
     if (kIsWeb) return;
 
     final db = await DatabaseHelper.instance.database;
+    final latestAreaIds = areas.map((area) => area.id).toSet();
+    final latestCheckpointIds = areas
+        .expand((area) => area.checkpoints)
+        .map((checkpoint) => checkpoint.id)
+        .toSet();
 
     await db.transaction((txn) async {
+      await _deleteStaleImportedJobData(
+        txn,
+        jobId: jobId,
+        latestAreaIds: latestAreaIds,
+        latestCheckpointIds: latestCheckpointIds,
+      );
+
       for (final area in areas) {
         await txn.insert(
           'ihm_areas',
@@ -71,6 +83,89 @@ class IhmOfflineService {
         }
       }
     });
+  }
+
+  static Future<void> _deleteStaleImportedJobData(
+    Transaction txn, {
+    required int jobId,
+    required Set<int> latestAreaIds,
+    required Set<int> latestCheckpointIds,
+  }) async {
+    final areaPlaceholders = latestAreaIds.map((_) => '?').join(',');
+    final checkpointPlaceholders = latestCheckpointIds.map((_) => '?').join(',');
+
+    if (latestCheckpointIds.isEmpty) {
+      await txn.delete(
+        'ihm_checkpoints',
+        where: 'surveyJobId = ?',
+        whereArgs: [jobId],
+      );
+      await txn.delete(
+        'ihm_markers',
+        where: 'surveyJobId = ?',
+        whereArgs: [jobId],
+      );
+      await txn.delete(
+        'ihm_sampling_photos',
+        where: 'surveyJobId = ?',
+        whereArgs: [jobId],
+      );
+    } else {
+      await txn.delete(
+        'ihm_checkpoints',
+        where: 'surveyJobId = ? AND id NOT IN ($checkpointPlaceholders)',
+        whereArgs: [jobId, ...latestCheckpointIds],
+      );
+      await txn.delete(
+        'ihm_markers',
+        where:
+            'surveyJobId = ? AND ihmCheckpointId IS NOT NULL AND ihmCheckpointId NOT IN ($checkpointPlaceholders)',
+        whereArgs: [jobId, ...latestCheckpointIds],
+      );
+      await txn.delete(
+        'ihm_sampling_photos',
+        where:
+            'surveyJobId = ? AND ihmCheckpointId IS NOT NULL AND ihmCheckpointId NOT IN ($checkpointPlaceholders)',
+        whereArgs: [jobId, ...latestCheckpointIds],
+      );
+    }
+
+    if (latestAreaIds.isEmpty) {
+      await txn.delete(
+        'ihm_areas',
+        where: 'surveyJobId = ?',
+        whereArgs: [jobId],
+      );
+      await txn.delete(
+        'ihm_layout_images',
+        where: 'surveyJobId = ? AND isCommon = 0',
+        whereArgs: [jobId],
+      );
+    } else {
+      await txn.delete(
+        'ihm_areas',
+        where: 'surveyJobId = ? AND id NOT IN ($areaPlaceholders)',
+        whereArgs: [jobId, ...latestAreaIds],
+      );
+      await txn.delete(
+        'ihm_layout_images',
+        where:
+            'surveyJobId = ? AND isCommon = 0 AND ihmAreaId IS NOT NULL AND ihmAreaId NOT IN ($areaPlaceholders)',
+        whereArgs: [jobId, ...latestAreaIds],
+      );
+      await txn.delete(
+        'ihm_markers',
+        where:
+            'surveyJobId = ? AND ihmAreaId IS NOT NULL AND ihmAreaId NOT IN ($areaPlaceholders)',
+        whereArgs: [jobId, ...latestAreaIds],
+      );
+      await txn.delete(
+        'ihm_sampling_photos',
+        where:
+            'surveyJobId = ? AND ihmAreaId IS NOT NULL AND ihmAreaId NOT IN ($areaPlaceholders)',
+        whereArgs: [jobId, ...latestAreaIds],
+      );
+    }
   }
 
   static Future<List<IhmArea>> getLocalAreas(int jobId) async {
@@ -281,6 +376,39 @@ class IhmOfflineService {
     }
 
     return getLocalMarkers(jobId);
+  }
+
+  static Future<List<IhmLayoutImage>> getLayouts(int jobId, int areaId) async {
+    if (kIsWeb) {
+      return ApiService.fetchIhmLayouts(jobId: jobId, areaId: areaId);
+    }
+
+    if (await isOnline) {
+      try {
+        final layouts = await ApiService.fetchIhmLayouts(
+          jobId: jobId,
+          areaId: areaId,
+        );
+        await _cacheLayouts(jobId, layouts);
+      } catch (_) {}
+    }
+
+    return getLocalLayouts(jobId, areaId);
+  }
+
+  static Future<List<IhmLayoutImage>> getLocalLayouts(
+    int jobId,
+    int areaId,
+  ) async {
+    final db = await DatabaseHelper.instance.database;
+    final rows = await db.query(
+      'ihm_layout_images',
+      where: 'surveyJobId = ? AND (ihmAreaId = ? OR isCommon = 1)',
+      whereArgs: [jobId, areaId],
+      orderBy: 'isCommon DESC, id ASC',
+    );
+
+    return rows.map(_layoutFromLocal).toList();
   }
 
   static Future<List<IhmMarker>> getLocalMarkers(int jobId) async {
@@ -710,9 +838,38 @@ final existing = existingRows
         return;
       }
 
-      throw UnsupportedError(
-        'Offline photo upload sync is temporarily disabled in Chrome-safe file.',
+      final rows = await db.query(
+        'ihm_sampling_photos',
+        where: 'id = ? AND deleted = 0',
+        whereArgs: [localId],
+        limit: 1,
       );
+      if (rows.isEmpty) return;
+
+      final photo = _photoFromLocal(rows.first);
+      final checkpointId = _int(rows.first['ihmCheckpointId']);
+      final checkpoint = await _getLocalCheckpoint(checkpointId);
+      final localPath = photo.localFilePath ?? photo.filePath;
+      final uploaded = await ApiService.uploadCheckpointPhoto(
+        checkpoint: checkpoint,
+        fileBytes: await readIhmLocalPhoto(localPath),
+        fileName: localPath.split(RegExp(r'[\\/]')).last,
+      );
+
+      await db.update(
+        'ihm_sampling_photos',
+        uploaded.toLocalMap(
+          surveyJobId: checkpoint.surveyJobId,
+          checkpointId: checkpoint.id,
+          areaId: checkpoint.ihmAreaId,
+          localId: localId,
+          localFilePath: localPath,
+          synced: 1,
+        ),
+        where: 'id = ?',
+        whereArgs: [localId],
+      );
+      return;
     }
   }
 
@@ -749,6 +906,30 @@ final existing = existingRows
           localId: photo.id,
         ),
         conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+  }
+
+  static Future<void> _cacheLayouts(
+    int jobId,
+    List<IhmLayoutImage> layouts,
+  ) async {
+    final db = await DatabaseHelper.instance.database;
+    for (final layout in layouts) {
+      await db.insert(
+        'ihm_layout_images',
+        {
+          'id': layout.id,
+          'surveyJobId': jobId,
+          'ihmAreaId': layout.ihmAreaId,
+          'filePath': layout.filePath,
+          'originalFileName': layout.originalFileName,
+          'contentType': layout.contentType,
+          'isCommon': layout.isCommon ? 1 : 0,
+          'synced': 1,
+          'updatedAt': DateTime.now().toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
       );
     }
   }
@@ -873,6 +1054,17 @@ final existing = existingRows
       xPercent: _double(row['xPercent']),
       yPercent: _double(row['yPercent']),
       markerLabel: row['markerLabel']?.toString(),
+    );
+  }
+
+  static IhmLayoutImage _layoutFromLocal(Map<String, Object?> row) {
+    return IhmLayoutImage(
+      id: _int(row['id']),
+      ihmAreaId: row['ihmAreaId'] == null ? null : _int(row['ihmAreaId']),
+      filePath: row['filePath']?.toString() ?? '',
+      originalFileName: row['originalFileName']?.toString() ?? 'Layout',
+      contentType: row['contentType']?.toString(),
+      isCommon: _int(row['isCommon']) == 1,
     );
   }
 

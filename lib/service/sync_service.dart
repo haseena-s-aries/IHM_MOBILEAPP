@@ -1,14 +1,51 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:Auras/Db/database_helper.dart';
 import 'package:Auras/app_config.dart';
+import 'package:Auras/ex_survey/ex_survey_offline_service.dart';
 import 'package:Auras/model/loadout.dart';
 import 'package:Auras/model/seafastening.dart';
 import 'package:Auras/model/towage.dart';
+import 'package:Auras/service/IhmOfflineService.dart';
 import 'package:Auras/service/api_service.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
 
 class SyncService {
   static bool _isSyncing = false;
+  static StreamSubscription<ConnectivityResult>? _connectivitySubscription;
+
+  static void startAutoSync() {
+    _connectivitySubscription ??=
+        Connectivity().onConnectivityChanged.listen((result) async {
+      if (result == ConnectivityResult.none) return;
+      await syncAllOfflineData();
+    });
+  }
+
+  static Future<void> stopAutoSync() async {
+    await _connectivitySubscription?.cancel();
+    _connectivitySubscription = null;
+  }
+
+  static Future<void> syncAllOfflineData() async {
+    if (_isSyncing) {
+      print("Sync already in progress - skipping");
+      return;
+    }
+    _isSyncing = true;
+
+    try {
+      await syncTowageCertificatesToServer();
+      await syncSeaFasteningCertificatesToServer();
+      await syncLoadoutCertificatesToServer();
+      await IhmOfflineService.syncPendingIhmData();
+      await ExSurveyOfflineService.syncPendingExData();
+      await syncFromServerToLocal();
+    } finally {
+      _isSyncing = false;
+    }
+  }
   // 🔁 SYNC ALL CERTIFICATES
 
   static Future<void> syncAllCertificatesToServer() async {

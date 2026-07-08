@@ -6,6 +6,7 @@ import 'package:Auras/screen/screen/dashboard_screen.dart';
 import 'package:Auras/screen/screen/landing_screen.dart';
 import 'package:Auras/screen/screen/login_screen.dart';
 import 'package:Auras/screen/screen/register_screen.dart';
+import 'package:Auras/service/sync_service.dart';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
@@ -51,6 +52,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   initializeHttpOverrides();
   await initializeDatabaseFactory();
+  SyncService.startAutoSync();
 
   final prefs = await SharedPreferences.getInstance();
   final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;

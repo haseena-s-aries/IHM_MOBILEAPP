@@ -5,6 +5,8 @@ import 'package:Auras/service/IhmOfflineService.dart';
 import 'package:Auras/service/api_service.dart';
 import 'package:Auras/utils/app_dialog.dart';
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/painting.dart';
 import 'package:image_picker/image_picker.dart';
@@ -853,7 +855,7 @@ class _AreaTabState extends State<_AreaTab> {
     List<IhmLayoutImage> layouts = [];
     String? loadError;
     try {
-      layouts = await ApiService.fetchIhmLayouts(jobId: jobId, areaId: areaId);
+      layouts = await IhmOfflineService.getLayouts(jobId, areaId);
     } catch (e) {
       loadError = e.toString();
     }
@@ -1509,7 +1511,24 @@ class _ImagesTabState extends State<_ImagesTab> {
   }
 
   Widget _buildPhotoImage(IhmSamplingPhoto photo) {
+    final localPath = photo.localFilePath;
+    if (localPath != null && localPath.isNotEmpty) {
+      return Image.file(
+        File(localPath),
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _brokenPhoto(),
+      );
+    }
+
     return Image.network(ApiService.fileUrl(photo.filePath), fit: BoxFit.cover);
+  }
+
+  Widget _brokenPhoto() {
+    return Container(
+      color: _c.bgCardAlt,
+      alignment: Alignment.center,
+      child: const Icon(Icons.broken_image_outlined, color: _A.accentRed),
+    );
   }
 
   @override

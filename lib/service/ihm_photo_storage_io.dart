@@ -25,3 +25,7 @@ Future<String> writeIhmLocalPhoto(Uint8List bytes, String fileName) async {
   await savedFile.writeAsBytes(bytes, flush: true);
   return savedFile.path;
 }
+
+Future<Uint8List> readIhmLocalPhoto(String path) async {
+  return File(path).readAsBytes();
+}
