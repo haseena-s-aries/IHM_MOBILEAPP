@@ -1,3 +1,5 @@
+﻿import 'dart:async';
+
 import 'package:Auras/service/api_service.dart';
 import 'package:flutter/material.dart';
 
@@ -24,18 +26,58 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _sendingOtp = false;
   bool _verifyingOtp = false;
   bool _registering = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
   String? _otpVerificationToken;
+  Timer? _resendTimer;
+  int _resendSeconds = 0;
+
+  static final RegExp _emailRegex = RegExp(
+    r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$',
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _emailController.addListener(_resetOtpWhenIdentityChanges);
+    _passwordController.addListener(_resetOtpWhenIdentityChanges);
+    _confirmPasswordController.addListener(_resetOtpWhenIdentityChanges);
+  }
+
+  @override
+  void dispose() {
+    _resendTimer?.cancel();
+    _nameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    _otpController.dispose();
+    super.dispose();
+  }
+
+  void _resetOtpWhenIdentityChanges() {
+    if (!_otpSent && !_otpVerified) return;
+    setState(() {
+      _otpSent = false;
+      _otpVerified = false;
+      _otpVerificationToken = null;
+      _otpController.clear();
+      _resendTimer?.cancel();
+      _resendSeconds = 0;
+    });
+  }
 
   Future<void> _showPopup(String title, String message) {
     return showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text(title),
         content: Text(message),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text("OK"),
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('OK'),
           ),
         ],
       ),
@@ -47,7 +89,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       context: context,
       barrierDismissible: false,
       builder: (_) => AlertDialog(
-        title: const Text("Registration"),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Registration'),
         content: Text(message),
       ),
     );
@@ -63,36 +106,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
     Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
   }
 
-  void _sendOtp() async {
-    if (_sendingOtp) return;
-    final fullName = _nameController.text.trim();
-    final email = _emailController.text.trim();
-    final password = _passwordController.text.trim();
-    final confirmPassword = _confirmPasswordController.text.trim();
+  void _startResendTimer() {
+    _resendTimer?.cancel();
+    setState(() => _resendSeconds = 45);
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_resendSeconds <= 1) {
+        timer.cancel();
+        setState(() => _resendSeconds = 0);
+      } else {
+        setState(() => _resendSeconds--);
+      }
+    });
+  }
 
-    if (fullName.isEmpty) {
-      _showPopup("Invalid Name", "Enter a valid name");
-      return;
-    }
-    if (email.isEmpty || !email.contains('@')) {
-      _showPopup("Invalid Email", "Enter a valid email address");
-      return;
-    }
-    final passwordMessage = _passwordValidationMessage(
-      password,
-      confirmPassword,
-    );
-    if (passwordMessage != null) {
-      _showPopup("Invalid Password", passwordMessage);
-      return;
-    }
-    if (password != confirmPassword) {
-      _showPopup(
-        "Password Mismatch",
-        "Password and Confirm Password must match",
-      );
-      return;
-    }
+  Future<void> _sendOtp() async {
+    FocusScope.of(context).unfocus();
+    if (_sendingOtp || _resendSeconds > 0) return;
+    if (!_formKey.currentState!.validate()) return;
 
     setState(() {
       _sendingOtp = true;
@@ -102,35 +136,39 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
 
     try {
-      final response = await ApiService.SendOtp(email);
+      final response = await ApiService.SendOtp(_emailController.text.trim());
       final msg = response['message']?.toString() ?? 'Failed to send OTP';
-      await _showPopup("OTP", msg);
+      await _showPopup('OTP', msg);
 
       if ((response['status'] == 200 ||
-              msg.toLowerCase().contains("otp sent")) &&
+              msg.toLowerCase().contains('otp sent')) &&
           mounted) {
         setState(() => _otpSent = true);
+        _startResendTimer();
       }
     } finally {
       if (mounted) setState(() => _sendingOtp = false);
     }
   }
 
-  void _verifyOtp() async {
+  Future<void> _verifyOtp() async {
+    FocusScope.of(context).unfocus();
     if (_verifyingOtp) return;
-    final email = _emailController.text.trim();
     final otp = _otpController.text.trim();
 
     if (otp.isEmpty) {
-      _showPopup("Missing OTP", "Please enter OTP first");
+      await _showPopup('Missing OTP', 'Please enter OTP first');
       return;
     }
 
     setState(() => _verifyingOtp = true);
     try {
-      final response = await ApiService.VerifyOtp(email, otp);
+      final response = await ApiService.VerifyOtp(
+        _emailController.text.trim(),
+        otp,
+      );
       final msg = response['message']?.toString() ?? 'OTP verification failed';
-      await _showPopup("OTP Verification", msg);
+      await _showPopup('OTP Verification', msg);
 
       if (response['status'] == 200 && mounted) {
         setState(() {
@@ -143,26 +181,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  void _register() async {
+  Future<void> _register() async {
+    FocusScope.of(context).unfocus();
     if (_registering) return;
+    if (!_formKey.currentState!.validate()) return;
     if (!_otpVerified) {
-      _showPopup("Error", "Please verify OTP first");
-      return;
-    }
-
-    final password = _passwordController.text.trim();
-    final confirmPassword = _confirmPasswordController.text.trim();
-    final passwordMessage = _passwordValidationMessage(
-      password,
-      confirmPassword,
-    );
-    if (passwordMessage != null) {
-      _showPopup("Invalid Password", passwordMessage);
-      return;
-    }
-
-    if (password != confirmPassword) {
-      _showPopup("Error", "Password and Confirm Password must match");
+      await _showPopup('OTP Required', 'Please verify OTP before registering.');
       return;
     }
 
@@ -170,8 +194,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final response = await ApiService.Register(
       _nameController.text.trim(),
       _emailController.text.trim(),
-      password,
-      confirmPassword,
+      _passwordController.text.trim(),
+      _confirmPasswordController.text.trim(),
       _selectedRole,
       _otpVerificationToken,
     );
@@ -180,7 +204,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final msg = response['message']?.toString() ?? 'Unexpected error';
     final status = response['status'];
     final success =
-        status == 200 && msg.toLowerCase().contains("account created");
+        status == 200 && msg.toLowerCase().contains('account created');
     if (success) {
       final message = _selectedRole == 'User'
           ? 'Account created successfully'
@@ -189,7 +213,41 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
-    await _showPopup("Registration", msg);
+    if (mounted) await _showPopup('Registration', msg);
+  }
+
+  String? _validateName(String? value) {
+    if ((value ?? '').trim().isEmpty) return 'Please enter Full Name';
+    return null;
+  }
+
+  String? _validateEmail(String? value) {
+    final email = value?.trim() ?? '';
+    if (email.isEmpty) return 'Please enter Email';
+    if (!_emailRegex.hasMatch(email)) {
+      return 'Please enter a valid email address';
+    }
+    return null;
+  }
+
+  String? _validatePassword(String? value) {
+    final password = value?.trim() ?? '';
+    final confirmPassword = _confirmPasswordController.text.trim();
+    final message = _passwordValidationMessage(password, confirmPassword);
+    if (message == 'Please enter Confirm Password') return null;
+    return message;
+  }
+
+  String? _validateConfirmPassword(String? value) {
+    final password = _passwordController.text.trim();
+    final confirmPassword = value?.trim() ?? '';
+    final message = _passwordValidationMessage(password, confirmPassword);
+    if (message == 'Please enter Password') return null;
+    if (message != null) return message;
+    if (password != confirmPassword) {
+      return 'Password and Confirm Password must match';
+    }
+    return null;
   }
 
   String? _passwordValidationMessage(String password, String confirmPassword) {
@@ -202,81 +260,338 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return null;
   }
 
+  bool get _canRegister =>
+      !_registering &&
+      _otpVerified &&
+      _nameController.text.trim().isNotEmpty &&
+      _emailController.text.trim().isNotEmpty &&
+      _passwordController.text.trim().isNotEmpty &&
+      _confirmPasswordController.text.trim().isNotEmpty;
+
   @override
   Widget build(BuildContext context) {
+    final isWide = MediaQuery.of(context).size.width > 720;
+
     return Scaffold(
-      appBar: AppBar(title: const Text("Register")),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(labelText: "Full Name"),
-              ),
-              TextFormField(
-                controller: _emailController,
-                decoration: const InputDecoration(labelText: "Email"),
-              ),
-              TextFormField(
-                controller: _passwordController,
-                decoration: const InputDecoration(labelText: "Password"),
-                obscureText: true,
-              ),
-              TextFormField(
-                controller: _confirmPasswordController,
-                decoration: const InputDecoration(
-                  labelText: "Confirm Password",
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFFF4F7FB), Color(0xFFEAF0FF)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: isWide ? 620 : 440),
+                child: Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(28),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF174EA6).withOpacity(0.12),
+                        blurRadius: 30,
+                        offset: const Offset(0, 18),
+                      ),
+                    ],
+                  ),
+                  child: Form(
+                    key: _formKey,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            IconButton(
+                              onPressed: () => Navigator.pop(context),
+                              icon: const Icon(Icons.arrow_back_rounded),
+                            ),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Create Account',
+                                    style: TextStyle(
+                                      fontSize: 26,
+                                      fontWeight: FontWeight.w900,
+                                      color: Color(0xFF10233F),
+                                    ),
+                                  ),
+                                  SizedBox(height: 4),
+                                  Text(
+                                    'Register and verify your email to continue.',
+                                    style: TextStyle(
+                                      color: Color(0xFF6B7890),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 24),
+                        TextFormField(
+                          controller: _nameController,
+                          textInputAction: TextInputAction.next,
+                          validator: _validateName,
+                          decoration: _inputDecoration(
+                            label: 'Full Name',
+                            icon: Icons.person_rounded,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        TextFormField(
+                          controller: _emailController,
+                          keyboardType: TextInputType.emailAddress,
+                          textInputAction: TextInputAction.next,
+                          validator: _validateEmail,
+                          decoration: _inputDecoration(
+                            label: 'Email Address',
+                            icon: Icons.alternate_email_rounded,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        TextFormField(
+                          controller: _passwordController,
+                          obscureText: _obscurePassword,
+                          textInputAction: TextInputAction.next,
+                          validator: _validatePassword,
+                          decoration: _inputDecoration(
+                            label: 'Password',
+                            icon: Icons.lock_rounded,
+                            suffix: IconButton(
+                              tooltip: _obscurePassword
+                                  ? 'Show password'
+                                  : 'Hide password',
+                              icon: Icon(
+                                _obscurePassword
+                                    ? Icons.visibility_off_rounded
+                                    : Icons.visibility_rounded,
+                              ),
+                              onPressed: () => setState(
+                                () => _obscurePassword = !_obscurePassword,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        TextFormField(
+                          controller: _confirmPasswordController,
+                          obscureText: _obscureConfirmPassword,
+                          validator: _validateConfirmPassword,
+                          decoration: _inputDecoration(
+                            label: 'Confirm Password',
+                            icon: Icons.verified_user_rounded,
+                            suffix: IconButton(
+                              tooltip: _obscureConfirmPassword
+                                  ? 'Show password'
+                                  : 'Hide password',
+                              icon: Icon(
+                                _obscureConfirmPassword
+                                    ? Icons.visibility_off_rounded
+                                    : Icons.visibility_rounded,
+                              ),
+                              onPressed: () => setState(
+                                () => _obscureConfirmPassword =
+                                    !_obscureConfirmPassword,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        DropdownButtonFormField<String>(
+                          value: _selectedRole,
+                          decoration: _inputDecoration(
+                            label: 'Requested Role',
+                            icon: Icons.badge_rounded,
+                          ),
+                          items: ['User', 'Surveyor', 'Manager', 'Admin']
+                              .map(
+                                (role) => DropdownMenuItem(
+                                  value: role,
+                                  child: Text(role),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (value) {
+                            if (value == null) return;
+                            setState(() => _selectedRole = value);
+                          },
+                        ),
+                        const SizedBox(height: 20),
+                        _otpPanel(),
+                        const SizedBox(height: 22),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: FilledButton.icon(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: _canRegister
+                                  ? const Color(0xFF2563EB)
+                                  : const Color(0xFF9AA7BA),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            onPressed: _canRegister ? _register : null,
+                            icon: _registering
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.4,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(Icons.how_to_reg_rounded),
+                            label: Text(
+                              _registering ? 'Registering...' : 'Register',
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Center(
+                          child: TextButton(
+                            onPressed: _registering
+                                ? null
+                                : () => Navigator.pushNamedAndRemoveUntil(
+                                      context,
+                                      '/login',
+                                      (route) => false,
+                                    ),
+                            child: const Text('Already registered? Login'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-                obscureText: true,
               ),
-              DropdownButtonFormField(
-                value: _selectedRole,
-                items: ['User', 'Surveyor', 'Manager', 'Admin']
-                    .map((r) => DropdownMenuItem(value: r, child: Text(r)))
-                    .toList(),
-                onChanged: (val) => setState(() => _selectedRole = val!),
-                decoration: const InputDecoration(labelText: "Role"),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _otpPanel() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5F7FB),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: _otpVerified ? const Color(0xFF16A34A) : const Color(0xFFD7DFEA),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                _otpVerified
+                    ? Icons.check_circle_rounded
+                    : Icons.mark_email_read_rounded,
+                color: _otpVerified
+                    ? const Color(0xFF16A34A)
+                    : const Color(0xFF2563EB),
               ),
-              const SizedBox(height: 12),
-              ElevatedButton(
-                onPressed: _sendingOtp ? null : _sendOtp,
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  _otpVerified ? 'Email verified' : 'Email OTP Verification',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF10233F),
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: (_sendingOtp || _resendSeconds > 0)
+                    ? null
+                    : _sendOtp,
                 child: Text(
                   _sendingOtp
-                      ? "Sending..."
-                      : (_otpSent ? "Resend OTP" : "Send OTP"),
+                      ? 'Sending...'
+                      : _otpSent
+                          ? (_resendSeconds > 0
+                              ? 'Resend in ${_resendSeconds}s'
+                              : 'Resend OTP')
+                          : 'Send OTP',
                 ),
-              ),
-              if (_otpSent)
-                Column(
-                  children: [
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _otpController,
-                      decoration: const InputDecoration(labelText: "Enter OTP"),
-                    ),
-                    const SizedBox(height: 8),
-                    ElevatedButton(
-                      onPressed: _verifyingOtp ? null : _verifyOtp,
-                      child: Text(
-                        _verifyingOtp ? "Verifying..." : "Verify OTP",
-                      ),
-                    ),
-                  ],
-                ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _otpVerified && !_registering ? _register : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _otpVerified ? Colors.blue : Colors.grey,
-                ),
-                child: Text(_registering ? "Registering..." : "Register"),
               ),
             ],
           ),
-        ),
+          if (_otpSent && !_otpVerified) ...[
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _otpController,
+              keyboardType: TextInputType.number,
+              decoration: _inputDecoration(
+                label: 'Enter OTP',
+                icon: Icons.pin_rounded,
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _verifyingOtp ? null : _verifyOtp,
+                icon: _verifyingOtp
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.verified_rounded),
+                label: Text(_verifyingOtp ? 'Verifying...' : 'Verify OTP'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  InputDecoration _inputDecoration({
+    required String label,
+    required IconData icon,
+    Widget? suffix,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      prefixIcon: Icon(icon),
+      suffixIcon: suffix,
+      filled: true,
+      fillColor: Colors.white,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFFD7DFEA)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFFD7DFEA)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFF2563EB), width: 1.6),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFFE11D48)),
       ),
     );
   }

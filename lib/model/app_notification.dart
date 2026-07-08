@@ -35,4 +35,26 @@ class AppNotification {
           DateTime.now(),
     );
   }
+
+  AppNotification copyWith({
+    int? id,
+    int? userId,
+    String? type,
+    String? title,
+    String? message,
+    int? surveyJobId,
+    bool? isRead,
+    DateTime? createdAt,
+  }) {
+    return AppNotification(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      type: type ?? this.type,
+      title: title ?? this.title,
+      message: message ?? this.message,
+      surveyJobId: surveyJobId ?? this.surveyJobId,
+      isRead: isRead ?? this.isRead,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
 }

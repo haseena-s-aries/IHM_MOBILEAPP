@@ -85,6 +85,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Future<void> _fetchPendingCount() async {
     try {
       final users = await ApiService.fetchPendingUsers();
+      if (!mounted) return;
       setState(() {
         _pendingCount = users.length;
       });
@@ -128,6 +129,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         await prefs.setInt('loadoutCount', result.loadoutCount);
       }
 
+      if (!mounted) return;
       setState(() {
         report = result;
         surveyStats = SurveyDashboardStats(
@@ -153,6 +155,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           : prefs.getInt('seaFasteningCount') ?? 0;
       final loadout = isSurveyor ? 0 : prefs.getInt('loadoutCount') ?? 0;
 
+      if (!mounted) return;
       setState(() {
         report = CertificateReport(
           totalCertificates: total,
@@ -165,6 +168,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _pages = const [];
       });
 
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text("Offline: last saved data")));
@@ -192,7 +196,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
     return RefreshIndicator(
       onRefresh: () async {
-        await SyncService.syncAllCertificatesToServer();
+        await SyncService.syncAllOfflineData();
         await SyncService.syncFromServerToLocal();
         await _fetchCertificateReport();
       },
@@ -1140,12 +1144,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 children: [
                   IconButton(
                     icon: const Icon(Icons.notifications),
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const PendingApprovalsScreen(),
-                      ),
-                    ),
+                    onPressed: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const PendingApprovalsScreen(),
+                        ),
+                      );
+                      if (mounted) _fetchPendingCount();
+                    },
                   ),
                   if (_pendingCount > 0)
                     Positioned(

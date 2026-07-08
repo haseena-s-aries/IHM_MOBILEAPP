@@ -19,6 +19,8 @@ class _UserFormModalState extends State<UserFormModal> {
   final _confirmPassword = TextEditingController();
   String _role = "User";
   bool isNew = true;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
 
   @override
   void initState() {
@@ -29,6 +31,15 @@ class _UserFormModalState extends State<UserFormModal> {
       _email.text = widget.user!['email'];
       _role = widget.user!['role'];
     }
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _email.dispose();
+    _password.dispose();
+    _confirmPassword.dispose();
+    super.dispose();
   }
 
   void _showPopup(String title, String message) {
@@ -44,11 +55,11 @@ class _UserFormModalState extends State<UserFormModal> {
     }
 
     final userData = {
-      "Id": widget.user?['id'] ?? 0,
-      "FullName": _name.text.trim(),
-      "Email": _email.text.trim(),
-      "Role": _role,
-      "Password": isNew ? _password.text.trim() : null, // only for new
+      "id": widget.user?['id'] ?? widget.user?['Id'] ?? 0,
+      "fullName": _name.text.trim(),
+      "email": _email.text.trim(),
+      "role": _role,
+      if (isNew) "password": _password.text.trim(),
     };
 
     final saved = await AppDialog.execute<bool>(
@@ -98,7 +109,14 @@ class _UserFormModalState extends State<UserFormModal> {
               TextFormField(
                 controller: _email,
                 decoration: const InputDecoration(labelText: "Email"),
-                validator: (v) => v!.isEmpty ? "Required" : null,
+                validator: (v) {
+                  final value = v?.trim() ?? '';
+                  if (value.isEmpty) return "Email is required";
+                  final valid = RegExp(
+                    r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$',
+                  ).hasMatch(value);
+                  return valid ? null : "Enter a valid email address";
+                },
               ),
               DropdownButtonFormField<String>(
                 value: _role,
@@ -111,15 +129,39 @@ class _UserFormModalState extends State<UserFormModal> {
               if (isNew) ...[
                 TextFormField(
                   controller: _password,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: "Password"),
-                  validator: (v) => v!.length < 6 ? "Min 6 characters" : null,
+                  obscureText: _obscurePassword,
+                  decoration: InputDecoration(
+                    labelText: "Password",
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_off
+                            : Icons.visibility,
+                      ),
+                      onPressed: () => setState(
+                        () => _obscurePassword = !_obscurePassword,
+                      ),
+                    ),
+                  ),
+                  validator: (v) =>
+                      (v ?? '').length < 6 ? "Min 6 characters" : null,
                 ),
                 TextFormField(
                   controller: _confirmPassword,
-                  obscureText: true,
-                  decoration: const InputDecoration(
+                  obscureText: _obscureConfirmPassword,
+                  decoration: InputDecoration(
                     labelText: "Confirm Password",
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscureConfirmPassword
+                            ? Icons.visibility_off
+                            : Icons.visibility,
+                      ),
+                      onPressed: () => setState(
+                        () => _obscureConfirmPassword =
+                            !_obscureConfirmPassword,
+                      ),
+                    ),
                   ),
                   validator: (v) =>
                       v != _password.text ? "Passwords do not match" : null,

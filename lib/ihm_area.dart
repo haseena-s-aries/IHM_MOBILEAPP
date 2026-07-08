@@ -223,8 +223,7 @@ class IhmCheckpoint {
     quantityUnitKg: quantityUnitKg ?? this.quantityUnitKg,
     quantityNo: quantityNo ?? this.quantityNo,
     quantityTotalKg: quantityTotalKg ?? this.quantityTotalKg,
-    manufacturerBrandName:
-        manufacturerBrandName ?? this.manufacturerBrandName,
+    manufacturerBrandName: manufacturerBrandName ?? this.manufacturerBrandName,
     surveyJobId: surveyJobId,
     ihmAreaId: ihmAreaId,
     isPchm: isPchm ?? this.isPchm,

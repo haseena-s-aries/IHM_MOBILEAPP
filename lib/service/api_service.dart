@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'package:Auras/Db/database_helper.dart';
 import 'package:Auras/app_config.dart';
 import 'package:Auras/ihm_area.dart';
@@ -405,7 +405,10 @@ class ApiService {
   }
 
   static Future<List<SurveyorOption>> fetchSurveyors() async {
-    final response = await http.get(Uri.parse('$baseUrl/User/surveyors'));
+    final response = await http.get(
+      Uri.parse('$baseUrl/User/surveyors'),
+      headers: await _authHeaders(),
+    );
 
     if (response.statusCode != 200) {
       throw Exception('Failed to load surveyors: ${response.body}');
@@ -428,6 +431,32 @@ class ApiService {
         .toList();
   }
 
+  static Future<List<SurveyorOption>> fetchManagers() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/User/managers'),
+      headers: await _authHeaders(),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to load managers: ${response.body}');
+    }
+
+    final List<dynamic> data = jsonDecode(response.body);
+
+    return data
+        .map((item) {
+          final json = item as Map<String, dynamic>;
+          return SurveyorOption(
+            id: int.tryParse(json['id'].toString()) ?? 0,
+            name: json['fullName']?.toString() ?? '',
+            email: json['email']?.toString() ?? '',
+            role: json['role']?.toString() ?? '',
+          );
+        })
+        .where((x) => x.id > 0)
+        .toList();
+  }
+
   static Future<void> assignSurveyJob({
     required int surveyJobId,
     required int surveyorUserId,
@@ -435,7 +464,7 @@ class ApiService {
   }) async {
     final response = await http.post(
       Uri.parse('$baseUrl/survey/jobs/$surveyJobId/assign'),
-      headers: {'Content-Type': 'application/json'},
+      headers: await _authHeaders(json: true),
       body: jsonEncode({
         'surveyorUserId': surveyorUserId,
         'assignedByUserId': assignedByUserId,
@@ -447,10 +476,10 @@ class ApiService {
     }
   }
 
-  // ✅ Change this to your live API when needed
+  // âœ… Change this to your live API when needed
   static String get baseUrl => AppConfig.baseUrl.replaceAll(RegExp(r'/$'), '');
 
-  /// 📲 User login with email & password
+  /// ðŸ“² User login with email & password
   static Future<Map<String, dynamic>> login(
     String email,
     String password,
@@ -474,7 +503,7 @@ class ApiService {
         }
         return decoded;
       } else {
-        // 💡 You can decode error body too
+        // ðŸ’¡ You can decode error body too
         var message = response.body.trim();
         if (message.isNotEmpty) {
           try {
@@ -495,7 +524,7 @@ class ApiService {
         throw Exception('Login failed: $message');
       }
     } catch (e) {
-      // 🔥 Catch network/format errors
+      // ðŸ”¥ Catch network/format errors
       throw Exception('Login error: $e');
     }
   }
@@ -540,7 +569,7 @@ class ApiService {
     }
   }
 
-  // 📩 Verify OTP
+  // ðŸ“© Verify OTP
   static Future<String> verifyOtp(String email, String otp) async {
     final url = Uri.parse('$baseUrl/User/verify-otp');
 
@@ -552,8 +581,8 @@ class ApiService {
       );
 
       final body = response.body.trim();
-      print('🔵 Status Code: ${response.statusCode}');
-      print('🟡 Raw Response: "$body"');
+      print('ðŸ”µ Status Code: ${response.statusCode}');
+      print('ðŸŸ¡ Raw Response: "$body"');
 
       if (response.statusCode == 200) {
         if (body.isEmpty) return "OTP verified (no message from server)";
@@ -565,7 +594,7 @@ class ApiService {
         throw Exception(json['message'] ?? "OTP verification failed.");
       }
     } catch (e) {
-      throw Exception("❌ Error verifying OTP: $e");
+      throw Exception("âŒ Error verifying OTP: $e");
     }
   }
 
@@ -589,6 +618,7 @@ class ApiService {
   static Future<void> deleteSurveyJob(int jobId) async {
     final response = await http.delete(
       Uri.parse('$baseUrl/survey/jobs/$jobId'),
+      headers: await _authHeaders(),
     );
 
     if (response.statusCode != 200 && response.statusCode != 204) {
@@ -719,8 +749,8 @@ class ApiService {
   ) async {
     final url = Uri.parse('$baseUrl/User/register');
 
-    print("📤 Sending Registration Request...");
-    print("🔸 Payload: {");
+    print("ðŸ“¤ Sending Registration Request...");
+    print("ðŸ”¸ Payload: {");
     print("   fullName: $fullName,");
     print("   email: $email,");
     print("   password: $password,");
@@ -741,15 +771,15 @@ class ApiService {
         }),
       );
 
-      print("🔵 Status Code: ${response.statusCode}");
-      print("🟡 Raw Response: ${response.body}");
+      print("ðŸ”µ Status Code: ${response.statusCode}");
+      print("ðŸŸ¡ Raw Response: ${response.body}");
 
       final responseBody = jsonDecode(response.body);
       final message = responseBody['message'] ?? 'Unexpected error';
 
       return {'status': response.statusCode, 'message': message};
     } catch (e) {
-      print("❌ Exception during registration: $e");
+      print("âŒ Exception during registration: $e");
       return {'status': 500, 'message': 'Error during registration: $e'};
     }
   }
@@ -764,7 +794,7 @@ class ApiService {
         return jsonDecode(response.body) as Map<String, dynamic>;
       } else {
         throw Exception(
-          "Failed to fetch towage certificate: ${response.statusCode} → ${response.body}",
+          "Failed to fetch towage certificate: ${response.statusCode} â†’ ${response.body}",
         );
       }
     } catch (e) {
@@ -782,7 +812,7 @@ class ApiService {
         return jsonDecode(response.body) as Map<String, dynamic>;
       } else {
         throw Exception(
-          "Failed to fetch towage certificate: ${response.statusCode} → ${response.body}",
+          "Failed to fetch towage certificate: ${response.statusCode} â†’ ${response.body}",
         );
       }
     } catch (e) {
@@ -802,7 +832,7 @@ class ApiService {
         return jsonDecode(response.body) as Map<String, dynamic>;
       } else {
         throw Exception(
-          "Failed to fetch seafastening  certificate: ${response.statusCode} → ${response.body}",
+          "Failed to fetch seafastening  certificate: ${response.statusCode} â†’ ${response.body}",
         );
       }
     } catch (e) {
@@ -865,7 +895,7 @@ class ApiService {
 
     final response = await http.post(
       url,
-      headers: {'Content-Type': 'application/json'},
+      headers: await _authHeaders(json: true),
       body: jsonEncode({'status': status}),
     );
 
@@ -895,7 +925,7 @@ class ApiService {
     SeaFasteningCertificate cert, {
     bool markSynced = false,
   }) async {
-    final db = await DatabaseHelper.instance.database; // ✅ Correct usage
+    final db = await DatabaseHelper.instance.database; // âœ… Correct usage
     await db.insert(
       'seafastening_certificate',
       cert.toMap()..['synced'] = markSynced ? 1 : 0,
@@ -907,7 +937,7 @@ class ApiService {
     final dbHelper = DatabaseHelper.instance;
 
     try {
-      // ✅ Step 1: Ensure recommendations and cargo details are loaded (or default to empty)
+      // âœ… Step 1: Ensure recommendations and cargo details are loaded (or default to empty)
       if (cert.recommendations == null || cert.recommendations!.isEmpty) {
         cert.recommendations = await dbHelper.getSeafasteningRecommendations(
           cert.id!,
@@ -920,12 +950,12 @@ class ApiService {
       }
       cert.cargoDetails ??= [];
 
-      // ✅ Optional debug
-      print("🚀 Syncing SeaFasteningCertificate:");
-      print("📦 Recommendations count: ${cert.recommendations?.length}");
-      print("📦 CargoDetails count: ${cert.cargoDetails?.length}");
+      // âœ… Optional debug
+      print("ðŸš€ Syncing SeaFasteningCertificate:");
+      print("ðŸ“¦ Recommendations count: ${cert.recommendations?.length}");
+      print("ðŸ“¦ CargoDetails count: ${cert.cargoDetails?.length}");
 
-      // ✅ Convert to JSON and sync
+      // âœ… Convert to JSON and sync
       final json = cert.toJson();
 
       final response = await http.post(
@@ -934,17 +964,17 @@ class ApiService {
         body: jsonEncode(json),
       );
 
-      print("✅ Status: ${response.statusCode}");
-      print("📬 Body: ${response.body}");
+      print("âœ… Status: ${response.statusCode}");
+      print("ðŸ“¬ Body: ${response.body}");
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         await dbHelper.markSeaFasteningCertificateAsSynced(cert.id!);
-        print("✅ Certificate synced successfully");
+        print("âœ… Certificate synced successfully");
       } else {
-        print("❌ Failed to sync certificate");
+        print("âŒ Failed to sync certificate");
       }
     } catch (e) {
-      print("🔥 Exception during sync: $e");
+      print("ðŸ”¥ Exception during sync: $e");
     }
   }
 
@@ -1071,13 +1101,13 @@ class ApiService {
     required String newPassword,
     required String confirmPassword,
   }) async {
-    print("📤 Hitting ChangePassword API...");
+    print("ðŸ“¤ Hitting ChangePassword API...");
     print(
       "Payload: userId=$UserId, current=$currentPassword, new=$newPassword",
     );
 
     final url = Uri.parse('$baseUrl/User/ChangePassword');
-    print("📤 Hitting ChangePassword API...");
+    print("ðŸ“¤ Hitting ChangePassword API...");
     final response = await http.post(
       url,
       headers: {'Content-Type': 'application/json'},
@@ -1089,8 +1119,8 @@ class ApiService {
       }),
     );
 
-    print("🔵 Status: ${response.statusCode}");
-    print("🟡 Body: ${response.body}");
+    print("ðŸ”µ Status: ${response.statusCode}");
+    print("ðŸŸ¡ Body: ${response.body}");
 
     final data = jsonDecode(response.body);
 
@@ -1105,8 +1135,8 @@ class ApiService {
     final url = Uri.parse('$baseUrl/User/GetProfile/$userId');
     final response = await http.get(url);
 
-    print("🔵 Status Code: ${response.statusCode}");
-    print("🟡 Body: ${response.body}");
+    print("ðŸ”µ Status Code: ${response.statusCode}");
+    print("ðŸŸ¡ Body: ${response.body}");
 
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
@@ -1134,7 +1164,7 @@ class ApiService {
     }
   }
 
-  // ✅ Send OTP
+  // âœ… Send OTP
   static Future<Map<String, dynamic>> SendOtp(String email) async {
     final url = Uri.parse('$baseUrl/User/send-otp');
 
@@ -1156,7 +1186,7 @@ class ApiService {
     }
   }
 
-  // ✅ Verify OTP
+  // âœ… Verify OTP
   static Future<Map<String, dynamic>> VerifyOtp(
     String email,
     String otp,
@@ -1186,7 +1216,7 @@ class ApiService {
     }
   }
 
-  // ✅ Register
+  // âœ… Register
   static Future<Map<String, dynamic>> Register(
     String fullName,
     String email,
@@ -1295,7 +1325,7 @@ class ApiService {
 
     if (response.statusCode == 200) {
       final message = response.body; // plain string
-      print("✅ Message: $message");
+      print("âœ… Message: $message");
       return true;
     } else {
       throw Exception('Failed to delete user: ${response.body}');
@@ -1303,39 +1333,55 @@ class ApiService {
   }
 
   static Future<bool> saveUser(Map<String, dynamic> user) async {
-    final bool isUpdate = (user['Id'] ?? 0) > 0;
+    final id = int.tryParse((user['id'] ?? user['Id'] ?? 0).toString()) ?? 0;
+    final bool isUpdate = id > 0;
+    final payload = <String, dynamic>{
+      'id': id,
+      'fullName': user['fullName'] ?? user['FullName'],
+      'email': user['email'] ?? user['Email'],
+      'role': user['role'] ?? user['Role'],
+      if ((user['password'] ?? user['Password']) != null)
+        'password': user['password'] ?? user['Password'],
+    };
 
     final url = Uri.parse('$baseUrl/AdminDashboard/Save');
     final response = await (isUpdate
         ? http.put(
-            // 🔁 Use PUT for update
             url,
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode(user),
+            headers: await _authHeaders(json: true),
+            body: jsonEncode(payload),
           )
         : http.post(
-            // ➕ Use POST for create
             url,
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode(user),
+            headers: await _authHeaders(json: true),
+            body: jsonEncode(payload),
           ));
 
-    print("🔁 Status Code: ${response.statusCode}");
-    print("🔁 Response Body: ${response.body}");
+    debugPrint('User save status: ${response.statusCode}');
+    debugPrint('User save body: ${response.body}');
 
     if (response.statusCode == 200) {
       final res = jsonDecode(response.body);
-      return res['message'] != null; // Adjust if you check for `success`
-    } else {
-      throw Exception('Failed to save user');
+      return res is Map && res['message'] != null;
     }
+
+    var message = response.body.trim();
+    try {
+      final decoded = jsonDecode(message);
+      if (decoded is Map<String, dynamic>) {
+        message = decoded['message']?.toString() ?? message;
+      }
+    } catch (_) {
+      // Preserve plain-text API response.
+    }
+    throw Exception(message.isEmpty ? 'Failed to save user' : message);
   }
 
   static Future<List<PendingUser>> fetchPendingUsers() async {
     final response = await http.get(Uri.parse('$baseUrl/User/pending-users'));
 
-    print("🔁 Status Code: ${response.statusCode}");
-    print("📦 Body: ${response.body}");
+    print("ðŸ” Status Code: ${response.statusCode}");
+    print("ðŸ“¦ Body: ${response.body}");
 
     if (response.statusCode == 200) {
       final List<dynamic> jsonList = jsonDecode(response.body);
@@ -1353,7 +1399,7 @@ class ApiService {
   }) async {
     final response = await http.post(
       Uri.parse('$baseUrl/survey/jobs/$surveyJobId/assign-surveyors'),
-      headers: {'Content-Type': 'application/json'},
+      headers: await _authHeaders(json: true),
       body: jsonEncode({
         'primarySurveyorUserId': primarySurveyorUserId,
         'secondarySurveyorUserId': secondarySurveyorUserId,
@@ -1363,6 +1409,21 @@ class ApiService {
 
     if (response.statusCode != 200) {
       throw Exception('Failed to assign surveyors: ${response.body}');
+    }
+  }
+
+  static Future<void> updateSurveyJobAssignedManager({
+    required int surveyJobId,
+    int? assignedManagerId,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/survey/jobs/$surveyJobId/assigned-manager'),
+      headers: await _authHeaders(json: true),
+      body: jsonEncode({'assignedManagerId': assignedManagerId}),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to update assigned manager: ${response.body}');
     }
   }
 
@@ -1419,6 +1480,7 @@ class ApiService {
   
     required String endDate,
     required int createdByUserId,
+    int? assignedManagerId,
     String? auditPort,
     String? auditAddress,
   }) async {
@@ -1426,7 +1488,7 @@ class ApiService {
 
     final response = await http.post(
       url,
-      headers: {'Content-Type': 'application/json'},
+      headers: await _authHeaders(json: true),
       body: jsonEncode({
         'moduleType': 2,
         'jobNumber': jobNumber,
@@ -1437,6 +1499,7 @@ class ApiService {
         'startDate': startDate,
         'endDate': endDate,
         'createdByUserId': createdByUserId,
+        'assignedManagerId': assignedManagerId,
         'auditPort': auditPort,
         'auditAddress': auditAddress,
       }),
@@ -1771,12 +1834,13 @@ class ApiService {
     required String startDate,
     required String endDate,
     required int createdByUserId,
+    int? assignedManagerId,
   }) async {
     final url = Uri.parse('$baseUrl/survey/jobs');
 
     final response = await http.post(
       url,
-      headers: {'Content-Type': 'application/json'},
+      headers: await _authHeaders(json: true),
       body: jsonEncode({
         'moduleType': 1,
         'jobNumber': jobNumber,
@@ -1787,6 +1851,7 @@ class ApiService {
         'startDate': startDate,
         'endDate': endDate,
         'createdByUserId': createdByUserId,
+        'assignedManagerId': assignedManagerId,
       }),
     );
 
@@ -1857,3 +1922,4 @@ class SurveyorOption {
     return '$name - $email';
   }
 }
+

@@ -29,7 +29,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 4,
+      version: 6,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -157,6 +157,8 @@ class DatabaseHelper {
     ''');
 
     await _createIhmOfflineTables(db);
+    await _createExSurveyOfflineTables(db);
+    await _createSurveyJobCacheTables(db);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -175,6 +177,34 @@ class DatabaseHelper {
     if (oldVersion < 4) {
       await _createIhmOfflineTables(db);
     }
+
+    if (oldVersion < 5) {
+      await _createIhmOfflineTables(db);
+      await _createExSurveyOfflineTables(db);
+    }
+
+    if (oldVersion < 6) {
+      await _createSurveyJobCacheTables(db);
+    }
+  }
+
+  Future<void> _createSurveyJobCacheTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS survey_jobs_cache (
+        id INTEGER NOT NULL,
+        surveyType TEXT NOT NULL,
+        userId INTEGER NOT NULL,
+        isAdmin INTEGER NOT NULL DEFAULT 0,
+        payloadJson TEXT NOT NULL,
+        updatedAt TEXT,
+        PRIMARY KEY (id, surveyType, userId, isAdmin)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS IX_survey_jobs_cache_scope
+        ON survey_jobs_cache(surveyType, userId, isAdmin)
+    ''');
   }
 
   Future<void> _createIhmOfflineTables(Database db) async {
@@ -256,7 +286,136 @@ class DatabaseHelper {
     ''');
 
     await db.execute('''
+      CREATE TABLE IF NOT EXISTS ihm_layout_images (
+        id INTEGER PRIMARY KEY,
+        surveyJobId INTEGER NOT NULL,
+        ihmAreaId INTEGER,
+        filePath TEXT,
+        originalFileName TEXT,
+        contentType TEXT,
+        isCommon INTEGER DEFAULT 0,
+        synced INTEGER DEFAULT 1,
+        updatedAt TEXT
+      )
+    ''');
+
+    await db.execute('''
       CREATE TABLE IF NOT EXISTS ihm_sync_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entityType TEXT NOT NULL,
+        entityLocalId INTEGER NOT NULL,
+        operation TEXT NOT NULL,
+        payloadJson TEXT NOT NULL,
+        status INTEGER DEFAULT 0,
+        retryCount INTEGER DEFAULT 0,
+        lastError TEXT,
+        createdAt TEXT,
+        updatedAt TEXT
+      )
+    ''');
+  }
+
+  Future<void> _createExSurveyOfflineTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ex_equipment (
+        id INTEGER PRIMARY KEY,
+        serverId INTEGER,
+        surveyJobId INTEGER NOT NULL,
+        equipmentId TEXT,
+        rfidTag TEXT,
+        area TEXT,
+        location TEXT,
+        equipmentType TEXT,
+        description TEXT,
+        manufacturer TEXT,
+        model TEXT,
+        serialNumber TEXT,
+        isActive INTEGER DEFAULT 1,
+        deleted INTEGER DEFAULT 0,
+        synced INTEGER DEFAULT 1,
+        updatedAt TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ex_checklist_questions (
+        id INTEGER PRIMARY KEY,
+        questionCode TEXT,
+        inspectionType TEXT,
+        questionText TEXT,
+        sortOrder INTEGER DEFAULT 0,
+        updatedAt TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ex_checklist_answers (
+        id INTEGER PRIMARY KEY,
+        serverId INTEGER,
+        exEquipmentId INTEGER NOT NULL,
+        exChecklistQuestionId INTEGER NOT NULL,
+        inspectionType TEXT,
+        result TEXT,
+        comment TEXT,
+        deleted INTEGER DEFAULT 0,
+        synced INTEGER DEFAULT 1,
+        updatedAt TEXT,
+        UNIQUE(exEquipmentId, exChecklistQuestionId) ON CONFLICT REPLACE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ex_defects (
+        id INTEGER PRIMARY KEY,
+        serverId INTEGER,
+        surveyJobId INTEGER NOT NULL,
+        exEquipmentId INTEGER NOT NULL,
+        equipmentCode TEXT,
+        defectNumber TEXT,
+        description TEXT,
+        severity TEXT,
+        recommendation TEXT,
+        status TEXT,
+        deleted INTEGER DEFAULT 0,
+        synced INTEGER DEFAULT 1,
+        updatedAt TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ex_photos (
+        id INTEGER PRIMARY KEY,
+        serverId INTEGER,
+        surveyJobId INTEGER NOT NULL,
+        exEquipmentId INTEGER,
+        originalFileName TEXT,
+        filePath TEXT,
+        localFilePath TEXT,
+        uploadedAt TEXT,
+        deleted INTEGER DEFAULT 0,
+        synced INTEGER DEFAULT 1,
+        updatedAt TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ex_documents (
+        id INTEGER PRIMARY KEY,
+        serverId INTEGER,
+        surveyJobId INTEGER NOT NULL,
+        documentType TEXT,
+        originalFileName TEXT,
+        filePath TEXT,
+        localFilePath TEXT,
+        sizeBytes INTEGER DEFAULT 0,
+        deleted INTEGER DEFAULT 0,
+        synced INTEGER DEFAULT 1,
+        updatedAt TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ex_sync_queue (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         entityType TEXT NOT NULL,
         entityLocalId INTEGER NOT NULL,

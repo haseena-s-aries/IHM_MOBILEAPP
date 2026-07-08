@@ -4,6 +4,7 @@ import 'package:Auras/model/survey_job.dart';
 import 'package:Auras/model/vessel.dart';
 import 'package:Auras/screen/screen/ihm_survey_screen.dart';
 import 'package:Auras/service/api_service.dart';
+import 'package:Auras/service/survey_job_offline_service.dart';
 import 'package:Auras/utils/app_dialog.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -49,6 +50,7 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
   List<Vessel> vessels = [];
   Vessel? selectedVessel;
   List<SurveyorOption> surveyors = [];
+  List<SurveyorOption> managers = [];
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
 
@@ -342,32 +344,48 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
       isLoading = true;
       errorMessage = null;
     });
+
     try {
       final prefs = await SharedPreferences.getInstance();
       userId = prefs.getInt('userId') ?? 0;
       final role = prefs.getString('userRole') ?? '';
       isAdmin =
           role.toLowerCase() == 'admin' || role.toLowerCase() == 'manager';
+
       if (isAdmin) {
-        vessels = await ApiService.fetchVessels();
+        try {
+          vessels = await ApiService.fetchVessels();
+        } catch (_) {
+          vessels = [];
+        }
         try {
           surveyors = await ApiService.fetchSurveyors();
         } catch (_) {
           surveyors = [];
         }
+        try {
+          managers = await ApiService.fetchManagers();
+        } catch (_) {
+          managers = [];
+        }
       }
-      final result = await ApiService.fetchSurveyJobsByType(
+
+      final result = await SurveyJobOfflineService.getSurveyJobsByType(
         surveyType: widget.surveyType,
         isAdmin: isAdmin,
         userId: userId,
       );
+
+      if (!mounted) return;
       setState(() {
         jobs = result;
         isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
-        errorMessage = e.toString();
+        errorMessage =
+            'No saved offline jobs found. Please connect once to load your jobs.';
         isLoading = false;
       });
     }
@@ -541,6 +559,7 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
 
     SurveyorOption? primarySurveyor;
     SurveyorOption? secondarySurveyor;
+    SurveyorOption? assignedManager;
 
     final startDate = TextEditingController();
     final endDate = TextEditingController();
@@ -808,6 +827,87 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
 
                             const SizedBox(height: 4),
                             _sectionLabel('ASSIGNMENT'),
+
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: DropdownButtonFormField<SurveyorOption?>(
+                                value: assignedManager,
+                                decoration: InputDecoration(
+                                  labelText: 'Assign Manager (Optional)',
+                                  suffixIcon: IconButton(
+                                    tooltip: 'Search managers',
+                                    icon: const Icon(Icons.search),
+                                    onPressed: () async {
+                                      final value =
+                                          await _showSearchPicker<
+                                            SurveyorOption
+                                          >(
+                                            title: 'Search Manager',
+                                            items: managers,
+                                            selected: assignedManager,
+                                            label: (manager) =>
+                                                manager.displayName,
+                                          );
+                                      if (value != null) {
+                                        setDialogState(
+                                          () => assignedManager = value,
+                                        );
+                                      }
+                                    },
+                                  ),
+                                  labelStyle: const TextStyle(
+                                    fontSize: 13,
+                                    color: _AppColors.textSecondary,
+                                  ),
+                                  filled: true,
+                                  fillColor: _AppColors.surface,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: const BorderSide(
+                                      color: _AppColors.divider,
+                                    ),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: const BorderSide(
+                                      color: _AppColors.divider,
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: const BorderSide(
+                                      color: _AppColors.ocean,
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                  isDense: true,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 14,
+                                  ),
+                                ),
+                                items: [
+                                  const DropdownMenuItem<SurveyorOption?>(
+                                    value: null,
+                                    child: Text('No manager assigned'),
+                                  ),
+                                  ...managers.map((manager) {
+                                    return DropdownMenuItem<SurveyorOption?>(
+                                      value: manager,
+                                      child: Text(
+                                        manager.displayName,
+                                        style: const TextStyle(fontSize: 14),
+                                      ),
+                                    );
+                                  }),
+                                ],
+                                onChanged: (value) {
+                                  setDialogState(() {
+                                    assignedManager = value;
+                                  });
+                                },
+                              ),
+                            ),
 
                             Padding(
                               padding: const EdgeInsets.only(bottom: 12),
@@ -1082,6 +1182,7 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
                                     startDate: startDate.text.trim(),
                                     endDate: endDate.text.trim(),
                                     createdByUserId: userId,
+                                    assignedManagerId: assignedManager?.id,
                                   );
                                 } else {
                                   job = await ApiService.createExSurveyJob(
@@ -1093,6 +1194,7 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
                                     startDate: startDate.text.trim(),
                                     endDate: endDate.text.trim(),
                                     createdByUserId: userId,
+                                    assignedManagerId: assignedManager?.id,
                                   );
                                 }
 
@@ -1146,6 +1248,13 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
     return null;
   }
 
+  SurveyorOption? _findManagerOption(int managerUserId) {
+    for (final manager in managers) {
+      if (manager.id == managerUserId) return manager;
+    }
+    return null;
+  }
+
   // ─── Assign Surveyor Dialog ─────────────────────────────────────────────────
   Future<void> _showAssignSurveyorDialog(SurveyJob job) async {
     final activeAssignments = job.activeAssignments;
@@ -1155,6 +1264,9 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
     SurveyorOption? secondarySurveyor = activeAssignments.length > 1
         ? _findSurveyorOption(activeAssignments[1].surveyorUserId)
         : null;
+    SurveyorOption? assignedManager = job.assignedManagerId == null
+        ? null
+        : _findManagerOption(job.assignedManagerId!);
 
     final assigned = await showDialog<bool>(
       context: context,
@@ -1244,6 +1356,84 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
                       padding: const EdgeInsets.all(24),
                       child: Column(
                         children: [
+                          DropdownButtonFormField<SurveyorOption?>(
+                            value: assignedManager,
+                            decoration: InputDecoration(
+                              labelText: 'Assign Manager (Optional)',
+                              suffixIcon: IconButton(
+                                tooltip: 'Search managers',
+                                icon: const Icon(Icons.search),
+                                onPressed: () async {
+                                  final value =
+                                      await _showSearchPicker<SurveyorOption>(
+                                        title: 'Search Manager',
+                                        items: managers,
+                                        selected: assignedManager,
+                                        label: (manager) =>
+                                            manager.displayName,
+                                      );
+                                  if (value != null) {
+                                    setDialogState(
+                                      () => assignedManager = value,
+                                    );
+                                  }
+                                },
+                              ),
+                              labelStyle: const TextStyle(
+                                fontSize: 13,
+                                color: _AppColors.textSecondary,
+                              ),
+                              filled: true,
+                              fillColor: _AppColors.surface,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: const BorderSide(
+                                  color: _AppColors.divider,
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: const BorderSide(
+                                  color: _AppColors.divider,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: const BorderSide(
+                                  color: _AppColors.ocean,
+                                  width: 1.5,
+                                ),
+                              ),
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 14,
+                              ),
+                            ),
+                            items: [
+                              const DropdownMenuItem<SurveyorOption?>(
+                                value: null,
+                                child: Text('No manager assigned'),
+                              ),
+                              ...managers.map((manager) {
+                                return DropdownMenuItem<SurveyorOption?>(
+                                  value: manager,
+                                  child: Text(
+                                    manager.displayName,
+                                    style: const TextStyle(fontSize: 14),
+                                  ),
+                                );
+                              }),
+                            ],
+                            onChanged: (value) {
+                              setDialogState(() {
+                                assignedManager = value;
+                              });
+                            },
+                          ),
+
+                          const SizedBox(height: 14),
+
                           DropdownButtonFormField<SurveyorOption?>(
                             value: primarySurveyor,
                             decoration: InputDecoration(
@@ -1484,6 +1674,11 @@ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
                                     secondarySurveyorUserId:
                                         secondarySurveyor?.id,
                                     assignedByUserId: userId,
+                                  );
+                                  await ApiService
+                                      .updateSurveyJobAssignedManager(
+                                    surveyJobId: job.id,
+                                    assignedManagerId: assignedManager?.id,
                                   );
                                   return true;
                                 },
@@ -2080,6 +2275,14 @@ Widget _buildJobMetaGrid(SurveyJob job) {
       onTap: isAdmin ? null : () => _pickAndSaveSurveyDate(job),
       actionText: isAdmin ? null : (job.surveyDate == null ? 'Select' : 'Change'),
     ),
+    if (job.assignedManagerName != null &&
+        job.assignedManagerName!.trim().isNotEmpty)
+      _metaTile(
+        label: 'Assigned Manager',
+        value: job.assignedManagerName!,
+        icon: Icons.admin_panel_settings_outlined,
+        color: _AppColors.purple,
+      ),
     if (primaryName != null && primaryName.trim().isNotEmpty)
       _metaTile(
         label: 'Primary Surveyor',

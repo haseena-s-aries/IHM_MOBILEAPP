@@ -52,7 +52,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // 🔁 Auto-sync when online, then refresh dashboard
     Connectivity().onConnectivityChanged.listen((result) async {
       if (result != ConnectivityResult.none) {
-        await SyncService.syncAllCertificatesToServer();
+        await SyncService.syncAllOfflineData();
         await SyncService.syncFromServerToLocal();
 
         // ✅ Refresh dashboard data after sync
@@ -142,6 +142,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             TextButton(
                               onPressed: () async {
                                 final userId = await _currentUserId();
+                                if (mounted) {
+                                  setState(() {
+                                    _notifications = _notifications
+                                        .map(
+                                          (item) =>
+                                              item.copyWith(isRead: true),
+                                        )
+                                        .toList();
+                                  });
+                                  setSheetState(() {});
+                                }
                                 await ApiService.markAllNotificationsRead(
                                   userId,
                                 );
@@ -207,6 +218,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     ),
                                     onTap: () async {
                                       if (!item.isRead) {
+                                        if (mounted) {
+                                          setState(() {
+                                            _notifications = _notifications
+                                                .map(
+                                                  (notification) =>
+                                                      notification.id == item.id
+                                                      ? notification.copyWith(
+                                                          isRead: true,
+                                                        )
+                                                      : notification,
+                                                )
+                                                .toList();
+                                          });
+                                          if (sheetContext.mounted) {
+                                            setSheetState(() {});
+                                          }
+                                        }
                                         await ApiService.markNotificationRead(
                                           item.id,
                                         );
@@ -258,7 +286,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return RefreshIndicator(
       onRefresh: () async {
-        await SyncService.syncAllCertificatesToServer();
+        await SyncService.syncAllOfflineData();
         await SyncService.syncFromServerToLocal();
         await _fetchCertificateReport();
         await _loadNotifications();
@@ -368,7 +396,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       context,
     ).showSnackBar(const SnackBar(content: Text("🔁 Syncing...")));
 
-    await SyncService.syncAllCertificatesToServer(); // 🔁 Call full sync
+    await SyncService.syncAllOfflineData(); // Sync all offline modules
 
     ScaffoldMessenger.of(
       context,

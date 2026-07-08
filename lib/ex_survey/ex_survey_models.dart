@@ -169,12 +169,14 @@ class ExSurveyPhoto {
   final int? equipmentId;
   final String originalFileName;
   final String filePath;
+  final String? localFilePath;
   final DateTime? uploadedAt;
 
   const ExSurveyPhoto({
     required this.id,
     required this.originalFileName,
     required this.filePath,
+    this.localFilePath,
     this.equipmentId,
     this.uploadedAt,
   });
@@ -187,6 +189,7 @@ class ExSurveyPhoto {
           : _int(json['equipmentId']),
       originalFileName: json['originalFileName']?.toString() ?? 'Photo',
       filePath: json['filePath']?.toString() ?? '',
+      localFilePath: _text(json['localFilePath']),
       uploadedAt: DateTime.tryParse(json['uploadedAt']?.toString() ?? ''),
     );
   }
@@ -197,6 +200,7 @@ class ExSurveyDocument {
   final String documentType;
   final String originalFileName;
   final String filePath;
+  final String? localFilePath;
   final int sizeBytes;
 
   const ExSurveyDocument({
@@ -204,6 +208,7 @@ class ExSurveyDocument {
     required this.documentType,
     required this.originalFileName,
     required this.filePath,
+    this.localFilePath,
     required this.sizeBytes,
   });
 
@@ -213,6 +218,7 @@ class ExSurveyDocument {
       documentType: json['documentType']?.toString() ?? 'Document',
       originalFileName: json['originalFileName']?.toString() ?? 'Document',
       filePath: json['filePath']?.toString() ?? '',
+      localFilePath: _text(json['localFilePath']),
       sizeBytes: _int(json['sizeBytes']),
     );
   }

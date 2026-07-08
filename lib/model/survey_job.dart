@@ -18,6 +18,9 @@ class SurveyJob {
   final DateTime? startDate;
   final DateTime? surveyDate;
   final DateTime? endDate;
+  final int? assignedUserId;
+  final int? assignedManagerId;
+  final String? assignedManagerName;
   final List<SurveyAssignment> assignments;
 
   SurveyJob({
@@ -40,6 +43,9 @@ class SurveyJob {
     this.startDate,
     this.surveyDate,
     this.endDate,
+    this.assignedUserId,
+    this.assignedManagerId,
+    this.assignedManagerName,
     this.assignments = const [],
   });
 
@@ -75,10 +81,42 @@ class SurveyJob {
       endDate: json['endDate'] == null
           ? null
           : DateTime.tryParse(json['endDate'].toString()),
+      assignedUserId: int.tryParse(json['assignedUserId']?.toString() ?? ''),
+      assignedManagerId:
+          int.tryParse(json['assignedManagerId']?.toString() ?? ''),
+      assignedManagerName: json['assignedManagerName']?.toString(),
       assignments: (json['assignments'] as List? ?? [])
           .map((e) => SurveyAssignment.fromJson(e as Map<String, dynamic>))
           .toList(),
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'moduleType': moduleType,
+      'jobNumber': jobNumber,
+      'clientName': clientName,
+      'projectName': projectName,
+      'vesselName': vesselName,
+      'imoNumber': imoNumber,
+      'siteName': siteName,
+      'status': status,
+      'createdAt': createdAt?.toIso8601String(),
+      'vesselId': vesselId,
+      'vesselSnapshotJson': vesselSnapshotJson,
+      'assignedSurveyorName': assignedSurveyorName,
+      'assignedAt': assignedAt?.toIso8601String(),
+      'auditPort': auditPort,
+      'auditAddress': auditAddress,
+      'startDate': startDate?.toIso8601String(),
+      'surveyDate': surveyDate?.toIso8601String(),
+      'endDate': endDate?.toIso8601String(),
+      'assignedUserId': assignedUserId,
+      'assignedManagerId': assignedManagerId,
+      'assignedManagerName': assignedManagerName,
+      'assignments': assignments.map((x) => x.toJson()).toList(),
+    };
   }
 
   List<SurveyAssignment> get activeAssignments =>
@@ -145,5 +183,16 @@ class SurveyAssignment {
           : DateTime.tryParse(json['assignedAt'].toString()),
       status: json['status']?.toString() ?? '',
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'surveyorUserId': surveyorUserId,
+      'surveyorName': surveyorName,
+      'assignedByUserId': assignedByUserId,
+      'assignedByName': assignedByName,
+      'assignedAt': assignedAt?.toIso8601String(),
+      'status': status,
+    };
   }
 }
