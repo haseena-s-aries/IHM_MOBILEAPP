@@ -11,6 +11,7 @@ import 'package:Auras/screen/screen/Towage_certificate_screen.dart';
 import 'package:Auras/screen/screen/changepassword_screen.dart';
 import 'package:Auras/screen/screen/pdf_viewer_screen.dart';
 import 'package:Auras/screen/screen/profile_screen.dart';
+import 'package:Auras/screen/screen/survey_job_list_screen.dart';
 import 'package:Auras/service/api_service.dart';
 import 'package:Auras/service/sync_service.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -36,6 +37,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<AppNotification> _notifications = const [];
   Timer? _notificationTimer;
   bool _notificationsLoaded = false;
+
+  String get _projectName =>
+      widget.user['projectName']?.toString().trim().toLowerCase() ?? '';
+
+  bool get _hasAllProjectAccess =>
+      _projectName.isEmpty || _projectName.contains('all');
+
+  bool get _hasAurasAccess =>
+      _hasAllProjectAccess || _projectName.contains('auras');
+
+  bool get _hasIhmAccess =>
+      _hasAllProjectAccess || _projectName.contains('ihm');
+
+  bool get _hasExSurveyAccess =>
+      _hasAllProjectAccess || _projectName.contains('ex');
 
   @override
   void initState() {
@@ -356,23 +372,79 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       style: TextStyle(color: Colors.white70, height: 1.35),
                     ),
                     const SizedBox(height: 18),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton.icon(
-                        onPressed: () => _showCreateDialog(context),
-                        icon: const Icon(Icons.add_rounded),
-                        label: const Text('Create Certificate'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: colors.primary,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                    if (_hasAurasAccess)
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton.icon(
+                          onPressed: () => _showCreateDialog(context),
+                          icon: const Icon(Icons.add_rounded),
+                          label: const Text('Create Certificate'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: colors.primary,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    if (_hasIhmAccess) ...[
+                      if (_hasAurasAccess) const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton.icon(
+                          onPressed: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const SurveyJobListScreen(
+                                surveyType: 'IHM Survey',
+                              ),
+                            ),
+                          ),
+                          icon: const Icon(Icons.inventory_2_rounded),
+                          label: const Text('Open IHM Survey'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: colors.primary,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (_hasExSurveyAccess) ...[
+                      if (_hasAurasAccess || _hasIhmAccess)
+                        const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton.icon(
+                          onPressed: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const SurveyJobListScreen(
+                                surveyType: 'Ex-Survey',
+                              ),
+                            ),
+                          ),
+                          icon: const Icon(Icons.electrical_services_rounded),
+                          label: const Text('Open Ex-Survey'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: colors.primary,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -638,6 +710,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildCurrentPage() {
+    if (!_hasAurasAccess) {
+      return _currentIndex == 0 ? _buildHomePage() : _buildProfileSection();
+    }
+
     switch (_currentIndex) {
       case 0:
         return _buildHomePage();
@@ -1002,13 +1078,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         unselectedItemColor: colors.textSecond,
         currentIndex: _currentIndex,
         onTap: _onTabTapped,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.assignment),
-            label: 'Certificates',
-          ),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+        items: [
+          const BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+          if (_hasAurasAccess)
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.assignment),
+              label: 'Certificates',
+            ),
+          const BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
         ],
       ),
     );

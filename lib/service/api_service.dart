@@ -11,6 +11,7 @@ import 'package:Auras/screen/screen/TaskManager_screen.dart';
 import 'package:Auras/model/survey_job.dart';
 import 'package:Auras/model/ihm_checkpoint_submission.dart';
 import 'package:Auras/model/app_notification.dart';
+import 'package:Auras/model/assigned_report.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
@@ -88,6 +89,38 @@ class ApiService {
       Uri.parse('$baseUrl/notifications/users/$userId/read-all'),
     );
     if (response.statusCode != 200) throw Exception(response.body);
+  }
+
+  static Future<List<AssignedReport>> fetchMyAssignedReports() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/report-assignments/my-reports'),
+      headers: await _authHeaders(),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to load assigned reports: ${response.body}');
+    }
+
+    final List<dynamic> rows = jsonDecode(response.body);
+    return rows
+        .map((row) => AssignedReport.fromJson(Map<String, dynamic>.from(row)))
+        .toList();
+  }
+
+  static Future<Uint8List> downloadAssignedReportPdf(AssignedReport report) async {
+    final type = report.reportType.toLowerCase();
+    final path = type == 'ihm'
+        ? '$baseUrl/ihm-survey/jobs/${report.reportId}/report-pdf'
+        : '$baseUrl/ex-survey/jobs/${report.reportId}/report';
+
+    final response = await http.get(
+      Uri.parse(path),
+      headers: await _authHeaders(),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to download report: ${response.body}');
+    }
+
+    return response.bodyBytes;
   }
 
   static Future<List<IhmCheckpointSubmission>> fetchIhmCheckpointSubmissions(
@@ -1222,9 +1255,11 @@ class ApiService {
     String email,
     String password,
     String confirmPassword,
-    String role, [
+    String role, {
+    required int projectId,
+    required int roleId,
     String? otpVerificationToken,
-  ]) async {
+  }) async {
     final url = Uri.parse('$baseUrl/User/register');
 
     try {
@@ -1237,6 +1272,8 @@ class ApiService {
           'password': password,
           'confirmPassword': confirmPassword,
           'role': role,
+          'projectId': projectId,
+          'roleId': roleId,
           'otpVerificationToken': otpVerificationToken,
         }),
       );
@@ -1377,8 +1414,27 @@ class ApiService {
     throw Exception(message.isEmpty ? 'Failed to save user' : message);
   }
 
+  static Future<List<RoleOption>> fetchPublicRoles(int projectId) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/User/projects/$projectId/roles'),
+    );
+
+    if (response.statusCode == 200) {
+      final List<dynamic> jsonList = jsonDecode(response.body);
+      return jsonList
+          .map((e) => RoleOption.fromJson(e as Map<String, dynamic>))
+          .where((role) => role.id > 0 && role.roleName.isNotEmpty)
+          .toList();
+    }
+
+    throw Exception("Failed to load roles: ${response.body}");
+  }
+
   static Future<List<PendingUser>> fetchPendingUsers() async {
-    final response = await http.get(Uri.parse('$baseUrl/User/pending-users'));
+    final response = await http.get(
+      Uri.parse('$baseUrl/User/pending-users'),
+      headers: await _authHeaders(),
+    );
 
     print("ðŸ” Status Code: ${response.statusCode}");
     print("ðŸ“¦ Body: ${response.body}");
@@ -1410,6 +1466,23 @@ class ApiService {
     if (response.statusCode != 200) {
       throw Exception('Failed to assign surveyors: ${response.body}');
     }
+  }
+
+  static Future<List<ProjectOption>> fetchProjects() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/User/projects'),
+      headers: await _authHeaders(),
+    );
+
+    if (response.statusCode == 200) {
+      final List<dynamic> jsonList = jsonDecode(response.body);
+      return jsonList
+          .map((e) => ProjectOption.fromJson(e as Map<String, dynamic>))
+          .where((project) => project.id > 0)
+          .toList();
+    }
+
+    throw Exception("Failed to load projects: ${response.body}");
   }
 
   static Future<void> updateSurveyJobAssignedManager({
@@ -1862,10 +1935,11 @@ class ApiService {
     return SurveyJob.fromJson(jsonDecode(response.body));
   }
 
-  static Future<void> approveUser(int id) async {
+  static Future<void> approveUser(int id, {required int projectId}) async {
     final res = await http.post(
       Uri.parse('$baseUrl/User/approve-user/$id'),
-      headers: await _authHeaders(),
+      headers: await _authHeaders(json: true),
+      body: jsonEncode({'projectId': projectId}),
     );
     if (res.statusCode != 200) throw Exception("Approve failed: ${res.body}");
   }

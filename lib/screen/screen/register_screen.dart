@@ -1,5 +1,6 @@
 ﻿import 'dart:async';
 
+import 'package:Auras/model/PendingUser.dart';
 import 'package:Auras/service/api_service.dart';
 import 'package:flutter/material.dart';
 
@@ -20,7 +21,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
       TextEditingController();
   final TextEditingController _otpController = TextEditingController();
 
-  String _selectedRole = 'User';
+  String _selectedRole = '';
+  int? _selectedProjectId;
+  int? _selectedRoleId;
+  List<ProjectOption> _projects = [];
+  List<RoleOption> _roles = [];
+  bool _loadingProjects = true;
   bool _otpSent = false;
   bool _otpVerified = false;
   bool _sendingOtp = false;
@@ -42,6 +48,43 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _emailController.addListener(_resetOtpWhenIdentityChanges);
     _passwordController.addListener(_resetOtpWhenIdentityChanges);
     _confirmPasswordController.addListener(_resetOtpWhenIdentityChanges);
+    _loadProjects();
+  }
+
+  Future<void> _loadProjects() async {
+    try {
+      final projects = await ApiService.fetchProjects();
+      if (!mounted) return;
+      setState(() {
+        _projects = projects;
+        _selectedProjectId = projects.isNotEmpty ? projects.first.id : null;
+        _loadingProjects = false;
+      });
+      if (_selectedProjectId != null) {
+        await _loadRoles(_selectedProjectId!);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingProjects = false);
+    }
+  }
+
+  Future<void> _loadRoles(int projectId) async {
+    try {
+      final roles = await ApiService.fetchPublicRoles(projectId);
+      if (!mounted) return;
+      setState(() {
+        _roles = roles;
+        _selectedRoleId = roles.isNotEmpty ? roles.first.id : null;
+        _selectedRole = roles.isNotEmpty ? roles.first.roleName : '';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _roles = [];
+        _selectedRoleId = null;
+        _selectedRole = '';
+      });
+    }
   }
 
   @override
@@ -189,6 +232,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
       await _showPopup('OTP Required', 'Please verify OTP before registering.');
       return;
     }
+    if (_selectedProjectId == null || _selectedRoleId == null) {
+      await _showPopup(
+        'Project Required',
+        'Please select project and role before registering.',
+      );
+      return;
+    }
 
     setState(() => _registering = true);
     final response = await ApiService.Register(
@@ -197,19 +247,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _passwordController.text.trim(),
       _confirmPasswordController.text.trim(),
       _selectedRole,
-      _otpVerificationToken,
+      projectId: _selectedProjectId!,
+      roleId: _selectedRoleId!,
+      otpVerificationToken: _otpVerificationToken,
     );
     if (mounted) setState(() => _registering = false);
 
     final msg = response['message']?.toString() ?? 'Unexpected error';
     final status = response['status'];
     final success =
-        status == 200 && msg.toLowerCase().contains('account created');
+        status == 200 &&
+        (msg.toLowerCase().contains('account created') ||
+            msg.toLowerCase().contains('registration successful'));
     if (success) {
-      final message = _selectedRole == 'User'
-          ? 'Account created successfully'
-          : 'Waiting for Admin Approval';
-      await _showApprovalAndRedirect(message);
+      await _showApprovalAndRedirect('Waiting for Admin Approval');
       return;
     }
 
@@ -266,7 +317,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _nameController.text.trim().isNotEmpty &&
       _emailController.text.trim().isNotEmpty &&
       _passwordController.text.trim().isNotEmpty &&
-      _confirmPasswordController.text.trim().isNotEmpty;
+      _confirmPasswordController.text.trim().isNotEmpty &&
+      _selectedProjectId != null &&
+      _selectedRoleId != null;
 
   @override
   Widget build(BuildContext context) {
@@ -410,23 +463,63 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                         ),
                         const SizedBox(height: 14),
-                        DropdownButtonFormField<String>(
-                          value: _selectedRole,
+                        DropdownButtonFormField<int>(
+                          value: _selectedProjectId,
+                          decoration: _inputDecoration(
+                            label: 'Requested Project / Module',
+                            icon: Icons.apps_rounded,
+                          ),
+                          items: _projects
+                              .map(
+                                (project) => DropdownMenuItem<int>(
+                                  value: project.id,
+                                  child: Text(project.name),
+                                ),
+                              )
+                              .toList(),
+                          validator: (value) =>
+                              value == null ? 'Please select Project' : null,
+                          onChanged: _loadingProjects
+                              ? null
+                              : (value) async {
+                                  if (value == null) return;
+                                  setState(() {
+                                    _selectedProjectId = value;
+                                    _roles = [];
+                                    _selectedRoleId = null;
+                                    _selectedRole = '';
+                                  });
+                                  await _loadRoles(value);
+                                },
+                        ),
+                        const SizedBox(height: 14),
+                        DropdownButtonFormField<int>(
+                          value: _selectedRoleId,
                           decoration: _inputDecoration(
                             label: 'Requested Role',
                             icon: Icons.badge_rounded,
                           ),
-                          items: ['User', 'Surveyor', 'Manager', 'Admin']
+                          items: _roles
                               .map(
-                                (role) => DropdownMenuItem(
-                                  value: role,
-                                  child: Text(role),
+                                (role) => DropdownMenuItem<int>(
+                                  value: role.id,
+                                  child: Text(role.roleName),
                                 ),
                               )
                               .toList(),
+                          validator: (value) =>
+                              value == null ? 'Please select Role' : null,
                           onChanged: (value) {
                             if (value == null) return;
-                            setState(() => _selectedRole = value);
+                            final role = _roles.firstWhere(
+                              (item) => item.id == value,
+                              orElse: () =>
+                                  RoleOption(id: value, roleName: ''),
+                            );
+                            setState(() {
+                              _selectedRoleId = value;
+                              _selectedRole = role.roleName;
+                            });
                           },
                         ),
                         const SizedBox(height: 20),

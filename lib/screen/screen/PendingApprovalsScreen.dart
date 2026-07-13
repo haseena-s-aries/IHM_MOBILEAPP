@@ -13,11 +13,24 @@ class PendingApprovalsScreen extends StatefulWidget {
 class _PendingApprovalsScreenState extends State<PendingApprovalsScreen> {
   late Future<List<PendingUser>> _pendingUsersFuture;
   final Set<int> _processing = {};
+  final Map<int, int?> _selectedProjectIds = {};
+  List<ProjectOption> _projects = [];
 
   @override
   void initState() {
     super.initState();
-    _pendingUsersFuture = ApiService.fetchPendingUsers();
+    _pendingUsersFuture = _loadPendingUsers();
+  }
+
+  Future<List<PendingUser>> _loadPendingUsers() async {
+    final usersFuture = ApiService.fetchPendingUsers();
+    final projectsFuture = ApiService.fetchProjects();
+    final users = await usersFuture;
+    _projects = await projectsFuture;
+    for (final user in users) {
+      _selectedProjectIds[user.id] ??= user.projectId;
+    }
+    return users;
   }
 
   void _showPopup(String title, String message) {
@@ -30,7 +43,7 @@ class _PendingApprovalsScreenState extends State<PendingApprovalsScreen> {
 
   void _refreshList() {
     setState(() {
-      _pendingUsersFuture = ApiService.fetchPendingUsers();
+      _pendingUsersFuture = _loadPendingUsers();
     });
   }
 
@@ -70,6 +83,33 @@ class _PendingApprovalsScreenState extends State<PendingApprovalsScreen> {
                     children: [
                       Text("Email: ${user.email}"),
                       Text("Requested Role: ${user.requestedRole}"),
+                      Text(
+                        "Requested Project: ${user.projectName?.trim().isNotEmpty == true ? user.projectName : '-'}",
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<int>(
+                        value: _selectedProjectIds[user.id],
+                        decoration: const InputDecoration(
+                          labelText: 'Approve Project',
+                          isDense: true,
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _projects
+                            .map(
+                              (project) => DropdownMenuItem<int>(
+                                value: project.id,
+                                child: Text(project.name),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: _processing.contains(user.id)
+                            ? null
+                            : (value) {
+                                setState(() {
+                                  _selectedProjectIds[user.id] = value;
+                                });
+                              },
+                      ),
                     ],
                   ),
                   trailing: Row(
@@ -82,6 +122,14 @@ class _PendingApprovalsScreenState extends State<PendingApprovalsScreen> {
                         ),
                         onPressed: () async {
                           if (_processing.contains(user.id)) return;
+                          final projectId = _selectedProjectIds[user.id];
+                          if (projectId == null || projectId <= 0) {
+                            _showPopup(
+                              "Approval failed",
+                              "Please select project before approving user.",
+                            );
+                            return;
+                          }
                           final confirmed = await AppDialog.confirm(
                             context,
                             title: 'Approve user?',
@@ -92,7 +140,10 @@ class _PendingApprovalsScreenState extends State<PendingApprovalsScreen> {
                           if (!confirmed) return;
                           setState(() => _processing.add(user.id));
                           try {
-                            await ApiService.approveUser(user.id);
+                            await ApiService.approveUser(
+                              user.id,
+                              projectId: projectId,
+                            );
                             if (!mounted) return;
                             _showPopup("Success", "User approved successfully.");
                             _refreshList();

@@ -50,6 +50,23 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   String get _role => widget.user['role']?.toString().toLowerCase() ?? '';
 
+  String get _projectName =>
+      widget.user['projectName']?.toString().trim().toLowerCase() ?? '';
+
+  bool get _isAdmin => _role == 'admin';
+
+  bool get _hasAllProjectAccess =>
+      _isAdmin || _projectName.isEmpty || _projectName.contains('all');
+
+  bool get _hasAurasAccess =>
+      _hasAllProjectAccess || _projectName.contains('auras');
+
+  bool get _hasIhmAccess =>
+      _hasAllProjectAccess || _projectName.contains('ihm');
+
+  bool get _hasExSurveyAccess =>
+      _hasAllProjectAccess || _projectName.contains('ex');
+
   bool get isSurveyor => _role == 'surveyor';
 
   bool get isAdminOrManager => _role == 'admin' || _role == 'manager';
@@ -212,7 +229,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             Row(
               children: [
                 // Card 1: Certificates (Loadout / Towage / Seafastening)
-                if (!isSurveyor)
+                if (!isSurveyor && _hasAurasAccess)
                   _buildTopActionCard(
                     icon: Icons.verified_rounded,
                     label: 'Certificates',
@@ -225,46 +242,50 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     isLast: false,
                   ),
                 // Card 2: IHM Survey
-                _buildTopActionCard(
-                  icon: Icons.inventory_2_rounded,
-                  label: 'IHM Survey',
-                  sublabel: 'Inventory of\nHazardous Materials',
-                  gradient: themeNotifier.isDarkMode
-                      ? const [Color(0xFF0D1E3A), Color(0xFF071228)]
-                      : const [Color(0xFF4158D0), Color(0xFF2575FC)],
-                  iconColor: const Color(0xFF79B8FF),
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          const SurveyJobListScreen(surveyType: 'IHM Survey'),
+                if (_hasIhmAccess)
+                  _buildTopActionCard(
+                    icon: Icons.inventory_2_rounded,
+                    label: 'IHM Survey',
+                    sublabel: 'Inventory of\nHazardous Materials',
+                    gradient: themeNotifier.isDarkMode
+                        ? const [Color(0xFF0D1E3A), Color(0xFF071228)]
+                        : const [Color(0xFF4158D0), Color(0xFF2575FC)],
+                    iconColor: const Color(0xFF79B8FF),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const SurveyJobListScreen(
+                          surveyType: 'IHM Survey',
+                        ),
+                      ),
                     ),
+                    isLast: false,
                   ),
-                  isLast: false,
-                ),
                 // Card 3: Ex-Survey
-                _buildTopActionCard(
-                  icon: Icons.electrical_services_rounded,
-                  label: 'Ex-Survey',
-                  sublabel: 'Explosion-proof\nEquipment Survey',
-                  gradient: themeNotifier.isDarkMode
-                      ? const [Color(0xFF3A0D0D), Color(0xFF220707)]
-                      : const [Color(0xFFFF416C), Color(0xFFFF6B35)],
-                  iconColor: const Color(0xFFFFB3B3),
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          const SurveyJobListScreen(surveyType: 'Ex-Survey'),
+                if (_hasExSurveyAccess)
+                  _buildTopActionCard(
+                    icon: Icons.electrical_services_rounded,
+                    label: 'Ex-Survey',
+                    sublabel: 'Explosion-proof\nEquipment Survey',
+                    gradient: themeNotifier.isDarkMode
+                        ? const [Color(0xFF3A0D0D), Color(0xFF220707)]
+                        : const [Color(0xFFFF416C), Color(0xFFFF6B35)],
+                    iconColor: const Color(0xFFFFB3B3),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const SurveyJobListScreen(
+                          surveyType: 'Ex-Survey',
+                        ),
+                      ),
                     ),
+                    isLast: true,
                   ),
-                  isLast: true,
-                ),
               ],
             ),
 
             // ───────────────────────────────────────────────────────────────
-            if (!isSurveyor) ...[
+            if (!isSurveyor && _hasAurasAccess) ...[
               const SizedBox(height: 22),
               Text(
                 'Certificate Summary',
@@ -368,36 +389,40 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             ),
             const SizedBox(height: 12),
 
-            _buildActionTile(
-              icon: Icons.inventory_2,
-              title: 'IHM Survey Jobs',
-              subtitle: 'Open all IHM survey jobs',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        const SurveyJobListScreen(surveyType: 'IHM Survey'),
-                  ),
-                );
-              },
-            ),
+            if (_hasIhmAccess)
+              _buildActionTile(
+                icon: Icons.inventory_2,
+                title: 'IHM Survey Jobs',
+                subtitle: 'Open all IHM survey jobs',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const SurveyJobListScreen(
+                        surveyType: 'IHM Survey',
+                      ),
+                    ),
+                  );
+                },
+              ),
 
-            _buildActionTile(
-              icon: Icons.electrical_services,
-              title: 'Ex-Survey Jobs',
-              subtitle: 'Open all Ex-Survey jobs',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        const SurveyJobListScreen(surveyType: 'Ex-Survey'),
-                  ),
-                );
-              },
-            ),
-            if (!isSurveyor) ...[
+            if (_hasExSurveyAccess)
+              _buildActionTile(
+                icon: Icons.electrical_services,
+                title: 'Ex-Survey Jobs',
+                subtitle: 'Open all Ex-Survey jobs',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const SurveyJobListScreen(
+                        surveyType: 'Ex-Survey',
+                      ),
+                    ),
+                  );
+                },
+              ),
+            if (!isSurveyor && _hasAurasAccess) ...[
               _buildActionTile(
                 icon: Icons.directions_boat,
                 title: 'Vessel Master',

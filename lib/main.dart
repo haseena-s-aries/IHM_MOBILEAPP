@@ -2,6 +2,7 @@ import 'package:Auras/ThemeNotifier.dart';
 import 'package:Auras/Db/database_factory_initializer.dart';
 import 'package:Auras/network/http_override_initilalizer.dart';
 import 'package:Auras/screen/screen/admin_dashboard_screen.dart';
+import 'package:Auras/screen/screen/assigned_reports_screen.dart';
 import 'package:Auras/screen/screen/dashboard_screen.dart';
 import 'package:Auras/screen/screen/landing_screen.dart';
 import 'package:Auras/screen/screen/login_screen.dart';
@@ -69,11 +70,14 @@ void main() async {
   Widget initialScreen;
 
   if (isLoggedIn && userRole != null && userId != null) {
-    if (userRole == 'admin' ||
-        userRole == 'manager' ||
-        userRole == 'surveyor') {
+    final normalizedRole = userRole.toLowerCase();
+    if (normalizedRole == 'admin' ||
+        normalizedRole == 'manager' ||
+        normalizedRole == 'surveyor') {
       initialScreen = AdminDashboardScreen(user: user);
-    } else if (userRole == 'user') {
+    } else if (normalizedRole == 'client') {
+      initialScreen = AssignedReportsScreen(user: user);
+    } else if (normalizedRole == 'user') {
       initialScreen = DashboardScreen(user: user);
     } else {
       initialScreen = const LoginScreen();

@@ -1,4 +1,5 @@
-﻿import 'package:Auras/screen/screen/admin_dashboard_screen.dart';
+import 'package:Auras/screen/screen/admin_dashboard_screen.dart';
+import 'package:Auras/screen/screen/assigned_reports_screen.dart';
 import 'package:Auras/screen/screen/forgotpassword_screen.dart';
 import 'package:Auras/screen/screen/register_screen.dart';
 import 'package:Auras/service/api_service.dart';
@@ -86,6 +87,13 @@ class _LoginScreenState extends State<LoginScreen> {
           context,
           MaterialPageRoute(
             builder: (_) => AdminDashboardScreen(user: userWithId),
+          ),
+        );
+      } else if (role == 'client') {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => AssignedReportsScreen(user: userWithId),
           ),
         );
       } else if (role == 'user') {

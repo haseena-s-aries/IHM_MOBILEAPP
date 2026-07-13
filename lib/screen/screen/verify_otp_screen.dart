@@ -37,6 +37,8 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
         widget.password,
         widget.password, // Confirm password same here
         widget.role,
+        projectId: 0,
+        roleId: 0,
       );
 
       final status = response['status'];
