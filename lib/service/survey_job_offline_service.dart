@@ -11,18 +11,25 @@ class SurveyJobOfflineService {
     required String surveyType,
     required bool isAdmin,
     required int userId,
+    String? ihmCompletionFilter,
+    String? jobCompletionFilter,
   }) async {
     try {
       final jobs = await ApiService.fetchSurveyJobsByType(
         surveyType: surveyType,
         isAdmin: isAdmin,
         userId: userId,
+        ihmCompletionFilter: ihmCompletionFilter,
+        jobCompletionFilter: jobCompletionFilter,
       );
+
       await cacheSurveyJobs(
         surveyType: surveyType,
         isAdmin: isAdmin,
         userId: userId,
         jobs: jobs,
+        ihmCompletionFilter: ihmCompletionFilter,
+        jobCompletionFilter: jobCompletionFilter,
       );
       return jobs;
     } catch (_) {
@@ -30,6 +37,8 @@ class SurveyJobOfflineService {
         surveyType: surveyType,
         isAdmin: isAdmin,
         userId: userId,
+        ihmCompletionFilter: ihmCompletionFilter,
+        jobCompletionFilter: jobCompletionFilter,
       );
       if (cachedJobs.isNotEmpty) {
         return cachedJobs;
@@ -43,13 +52,26 @@ class SurveyJobOfflineService {
     required bool isAdmin,
     required int userId,
     required List<SurveyJob> jobs,
+    String? ihmCompletionFilter,
+    String? jobCompletionFilter,
   }) async {
+    final hasIhmCompletionFilter =
+        ihmCompletionFilter != null && ihmCompletionFilter.trim().isNotEmpty;
+    final hasJobCompletionFilter =
+        jobCompletionFilter != null && jobCompletionFilter.trim().isNotEmpty;
+
     await _cacheSurveyJobsInPrefs(
       surveyType: surveyType,
       isAdmin: isAdmin,
       userId: userId,
       jobs: jobs,
+      ihmCompletionFilter: ihmCompletionFilter,
+      jobCompletionFilter: jobCompletionFilter,
     );
+
+    if (hasIhmCompletionFilter || hasJobCompletionFilter) {
+      return;
+    }
 
     final scopeUserId = userId;
     final scopeIsAdmin = isAdmin ? 1 : 0;
@@ -86,7 +108,23 @@ class SurveyJobOfflineService {
     required String surveyType,
     required bool isAdmin,
     required int userId,
+    String? ihmCompletionFilter,
+    String? jobCompletionFilter,
   }) async {
+    final hasIhmCompletionFilter =
+        ihmCompletionFilter != null && ihmCompletionFilter.trim().isNotEmpty;
+    final hasJobCompletionFilter =
+        jobCompletionFilter != null && jobCompletionFilter.trim().isNotEmpty;
+    if (hasIhmCompletionFilter || hasJobCompletionFilter) {
+      return _getCachedSurveyJobsFromPrefs(
+        surveyType: surveyType,
+        isAdmin: isAdmin,
+        userId: userId,
+        ihmCompletionFilter: ihmCompletionFilter,
+        jobCompletionFilter: jobCompletionFilter,
+      );
+    }
+
     final scopeUserId = userId;
     final scopeIsAdmin = isAdmin ? 1 : 0;
     try {
@@ -154,12 +192,16 @@ class SurveyJobOfflineService {
     required bool isAdmin,
     required int userId,
     required List<SurveyJob> jobs,
+    String? ihmCompletionFilter,
+    String? jobCompletionFilter,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     final key = _prefsKey(
       surveyType: surveyType,
       isAdmin: isAdmin,
       userId: userId,
+      ihmCompletionFilter: ihmCompletionFilter,
+      jobCompletionFilter: jobCompletionFilter,
     );
     await prefs.setString(
       key,
@@ -171,12 +213,26 @@ class SurveyJobOfflineService {
     required String surveyType,
     required bool isAdmin,
     required int userId,
+    String? ihmCompletionFilter,
+    String? jobCompletionFilter,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     final keys = <String>[
-      _prefsKey(surveyType: surveyType, isAdmin: isAdmin, userId: userId),
+      _prefsKey(
+        surveyType: surveyType,
+        isAdmin: isAdmin,
+        userId: userId,
+        ihmCompletionFilter: ihmCompletionFilter,
+        jobCompletionFilter: jobCompletionFilter,
+      ),
       if (isAdmin)
-        _prefsKey(surveyType: surveyType, isAdmin: isAdmin, userId: 0),
+        _prefsKey(
+          surveyType: surveyType,
+          isAdmin: isAdmin,
+          userId: 0,
+          ihmCompletionFilter: ihmCompletionFilter,
+          jobCompletionFilter: jobCompletionFilter,
+        ),
     ];
 
     for (final key in keys) {
@@ -199,8 +255,19 @@ class SurveyJobOfflineService {
     required String surveyType,
     required bool isAdmin,
     required int userId,
+    String? ihmCompletionFilter,
+    String? jobCompletionFilter,
   }) {
     final normalizedType = surveyType.toLowerCase().replaceAll(' ', '_');
-    return 'survey_jobs_cache_${normalizedType}_${isAdmin ? 1 : 0}_$userId';
+    final normalizedIhmFilter = ihmCompletionFilter?.trim().toLowerCase() ?? '';
+    final normalizedJobFilter = jobCompletionFilter?.trim().toLowerCase() ?? '';
+    if (normalizedIhmFilter.isEmpty && normalizedJobFilter.isEmpty) {
+      return 'survey_jobs_cache_${normalizedType}_${isAdmin ? 1 : 0}_$userId';
+    }
+
+    final normalizedFilter = normalizedIhmFilter.isNotEmpty
+        ? normalizedIhmFilter
+        : normalizedJobFilter;
+    return 'survey_jobs_cache_${normalizedType}_${isAdmin ? 1 : 0}_${userId}_$normalizedFilter';
   }
 }

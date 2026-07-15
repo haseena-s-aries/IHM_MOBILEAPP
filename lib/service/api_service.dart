@@ -106,6 +106,135 @@ class ApiService {
         .toList();
   }
 
+  static Future<List<Map<String, dynamic>>> fetchSavedReports() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/AdminDashboard/saved-reports'),
+      headers: await _authHeaders(),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to load reports: ${response.body}');
+    }
+
+    final List<dynamic> rows = jsonDecode(response.body);
+    return rows.map((row) => Map<String, dynamic>.from(row as Map)).toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchReportClients({
+    required String projectType,
+    String search = '',
+  }) async {
+    final uri = Uri.parse('$baseUrl/report-assignments/clients').replace(
+      queryParameters: {
+        'projectType': projectType,
+        if (search.trim().isNotEmpty) 'search': search.trim(),
+      },
+    );
+    final response = await http.get(uri, headers: await _authHeaders());
+    if (response.statusCode != 200) {
+      throw Exception('Failed to load Client users: ${response.body}');
+    }
+
+    final List<dynamic> rows = jsonDecode(response.body);
+    return rows.map((row) => Map<String, dynamic>.from(row as Map)).toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchReportAssignments({
+    required String reportType,
+    required int reportId,
+  }) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/report-assignments/$reportType/$reportId'),
+      headers: await _authHeaders(),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to load assignments: ${response.body}');
+    }
+
+    final List<dynamic> rows = jsonDecode(response.body);
+    return rows.map((row) => Map<String, dynamic>.from(row as Map)).toList();
+  }
+
+  static Future<String> assignReportToClient({
+    required String reportType,
+    required int reportId,
+    required int clientUserId,
+    int? surveyJobId,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/report-assignments'),
+      headers: await _authHeaders(json: true),
+      body: jsonEncode({
+        'reportType': reportType,
+        'reportId': reportId,
+        'surveyJobId': surveyJobId ?? reportId,
+        'clientUserId': clientUserId,
+      }),
+    );
+
+    final body = response.body.trim();
+    if (response.statusCode != 200) {
+      final payload = _safeJsonMessage(
+        response,
+        fallbackMessage: 'Unable to send report. Please try again.',
+      );
+      throw Exception(payload['message']?.toString() ?? 'Unable to send report.');
+    }
+
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map && decoded['message'] != null) {
+        return decoded['message'].toString();
+      }
+    } catch (_) {}
+    return 'Report assigned successfully.';
+  }
+
+  static Future<String> revokeReportAssignment(int assignmentId) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/report-assignments/$assignmentId/revoke'),
+      headers: await _authHeaders(json: true),
+      body: '{}',
+    );
+
+    final body = response.body.trim();
+    if (response.statusCode != 200) {
+      final payload = _safeJsonMessage(
+        response,
+        fallbackMessage: 'Unable to remove assignment. Please try again.',
+      );
+      throw Exception(
+        payload['message']?.toString() ?? 'Unable to remove assignment.',
+      );
+    }
+
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map && decoded['message'] != null) {
+        return decoded['message'].toString();
+      }
+    } catch (_) {}
+    return 'Report assignment removed.';
+  }
+
+  static Future<Uint8List> downloadSavedReportPdf({
+    required String reportType,
+    required int reportId,
+  }) async {
+    final type = reportType.toLowerCase();
+    final path = type == 'ihm'
+        ? '$baseUrl/ihm-survey/jobs/$reportId/report-pdf'
+        : type == 'exsurvey'
+            ? '$baseUrl/ex-survey/jobs/$reportId/report'
+            : '$baseUrl/AdminDashboard/view-pdf/$type/$reportId';
+
+    final response = await http.get(Uri.parse(path), headers: await _authHeaders());
+    if (response.statusCode != 200) {
+      throw Exception('Failed to download report: ${response.body}');
+    }
+
+    return response.bodyBytes;
+  }
+
   static Future<Uint8List> downloadAssignedReportPdf(AssignedReport report) async {
     final type = report.reportType.toLowerCase();
     final path = type == 'ihm'
@@ -574,6 +703,74 @@ class ApiService {
     }
   }
 
+  static Future<Map<String, int>> fetchSurveyorDashboardSummary() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/survey/dashboard/my-summary'),
+      headers: await _authHeaders(),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Failed to fetch surveyor dashboard summary: ${response.body}',
+      );
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    int readInt(String key) {
+      final value = data[key] ?? data[_toPascalCase(key)];
+      if (value is int) return value;
+      return int.tryParse(value?.toString() ?? '') ?? 0;
+    }
+
+    return {
+      'liveJobs': readInt('liveJobs'),
+      'completedJobs': readInt('completedJobs'),
+    };
+  }
+
+  static Future<Map<String, int>> fetchSurveySummary() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/survey/summary'),
+      headers: await _authHeaders(),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to fetch survey summary: ${response.body}');
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    int readInt(String key) {
+      final value = data[key] ?? data[_toPascalCase(key)];
+      if (value is int) return value;
+      return int.tryParse(value?.toString() ?? '') ?? 0;
+    }
+
+    return {
+      'totalSurveyJobs': readInt('totalSurveyJobs'),
+      'ihmSurveyJobs': readInt('ihmSurveyJobs'),
+      'exSurveyJobs': readInt('exSurveyJobs'),
+      'submittedJobs': readInt('submittedJobs'),
+      'approvedJobs': readInt('approvedJobs'),
+      'closedJobs': readInt('closedJobs'),
+      'liveJobs': readInt('ihmLiveJobs') > 0 || readInt('ihmCompletedJobs') > 0
+          ? readInt('ihmLiveJobs')
+          : readInt('liveIhmJobs'),
+      'ihmLiveJobs': readInt('ihmLiveJobs') > 0 || readInt('ihmCompletedJobs') > 0
+          ? readInt('ihmLiveJobs')
+          : readInt('liveIhmJobs'),
+      'completedJobs': readInt('ihmCompletedJobs'),
+      'exSurveyLiveJobs': readInt('exSurveyLiveJobs'),
+      'exSurveyReports': readInt('exSurveyReports'),
+      'ihmUsersCount': readInt('ihmUsersCount'),
+      'exSurveyUsersCount': readInt('exSurveyUsersCount'),
+    };
+  }
+
+  static String _toPascalCase(String value) {
+    if (value.isEmpty) return value;
+    return value[0].toUpperCase() + value.substring(1);
+  }
+
   static Future<List<dynamic>> getAllUsers() async {
     final response = await http.get(
       Uri.parse('$baseUrl/AdminDashboard/GetAll'),
@@ -660,7 +857,10 @@ class ApiService {
   }
 
   static Future<List<Vessel>> fetchVessels() async {
-    final response = await http.get(Uri.parse('$baseUrl/vessels'));
+    final response = await http.get(
+      Uri.parse('$baseUrl/vessels'),
+      headers: await _authHeaders(),
+    );
 
     if (response.statusCode != 200) {
       throw Exception('Failed to fetch vessels: ${response.body}');
@@ -877,6 +1077,8 @@ class ApiService {
     required String surveyType,
     required bool isAdmin,
     required int userId,
+    String? ihmCompletionFilter,
+    String? jobCompletionFilter,
   }) async {
     final moduleType = surveyType == 'IHM Survey' ? 'IhmSurvey' : 'ExSurvey';
 
@@ -884,6 +1086,18 @@ class ApiService {
 
     if (!isAdmin) {
       queryParams['assignedSurveyorUserId'] = userId.toString();
+    }
+
+    if (surveyType == 'IHM Survey' &&
+        ihmCompletionFilter != null &&
+        ihmCompletionFilter.trim().isNotEmpty) {
+      queryParams['ihmCompletionFilter'] = ihmCompletionFilter.trim();
+    }
+
+    if (surveyType != 'IHM Survey' &&
+        jobCompletionFilter != null &&
+        jobCompletionFilter.trim().isNotEmpty) {
+      queryParams['jobCompletionFilter'] = jobCompletionFilter.trim();
     }
 
     final uri = Uri.parse(
@@ -1377,6 +1591,14 @@ class ApiService {
       'fullName': user['fullName'] ?? user['FullName'],
       'email': user['email'] ?? user['Email'],
       'role': user['role'] ?? user['Role'],
+      'projectId': user['projectId'] ?? user['ProjectId'],
+      'projectName': user['projectName'] ?? user['ProjectName'],
+      'roleId': user['roleId'] ?? user['RoleId'],
+      'roleName': user['roleName'] ?? user['RoleName'],
+      'requestedRole': user['requestedRole'] ?? user['RequestedRole'],
+      'replaceProjectAccesses':
+          user['replaceProjectAccesses'] ?? user['ReplaceProjectAccesses'] ?? false,
+      'projectAccesses': user['projectAccesses'] ?? user['ProjectAccesses'] ?? [],
       if ((user['password'] ?? user['Password']) != null)
         'password': user['password'] ?? user['Password'],
     };
@@ -1483,6 +1705,40 @@ class ApiService {
     }
 
     throw Exception("Failed to load projects: ${response.body}");
+  }
+
+  static Future<List<ProjectOption>> fetchManageableProjects() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/AdminDashboard/manageable-projects'),
+      headers: await _authHeaders(),
+    );
+
+    if (response.statusCode == 200) {
+      final List<dynamic> jsonList = jsonDecode(response.body);
+      return jsonList
+          .map((e) => ProjectOption.fromJson(e as Map<String, dynamic>))
+          .where((project) => project.id > 0)
+          .toList();
+    }
+
+    throw Exception("Failed to load manageable projects: ${response.body}");
+  }
+
+  static Future<List<RoleOption>> fetchManagedProjectRoles(int projectId) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/AdminDashboard/projects/$projectId/roles'),
+      headers: await _authHeaders(),
+    );
+
+    if (response.statusCode == 200) {
+      final List<dynamic> jsonList = jsonDecode(response.body);
+      return jsonList
+          .map((e) => RoleOption.fromJson(e as Map<String, dynamic>))
+          .where((role) => role.id > 0 && role.roleName.isNotEmpty)
+          .toList();
+    }
+
+    throw Exception("Failed to load project roles: ${response.body}");
   }
 
   static Future<void> updateSurveyJobAssignedManager({

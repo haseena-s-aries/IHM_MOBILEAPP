@@ -36,7 +36,7 @@ class AssignedReport {
       vesselName: (json['vesselName'] ?? json['VesselName'] ?? 'Vessel not specified').toString(),
       reference: (json['reference'] ?? json['Reference'] ?? '').toString(),
       status: (json['status'] ?? json['Status'] ?? 'Assigned').toString(),
-      createdBy: (json['createdBy'] ?? json['CreatedBy'] ?? 'Not confirmed').toString(),
+      createdBy: (json['createdBy'] ?? json['CreatedBy'] ?? 'Creator unavailable').toString(),
       assignedAt: assignedAt,
     );
   }

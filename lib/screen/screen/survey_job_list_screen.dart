@@ -36,7 +36,19 @@ class _AppColors {
 
 class SurveyJobListScreen extends StatefulWidget {
   final String surveyType;
-  const SurveyJobListScreen({super.key, required this.surveyType});
+  final List<String> statusFilters;
+  final String? ihmCompletionFilter;
+  final String? jobCompletionFilter;
+  final String? titleOverride;
+
+  const SurveyJobListScreen({
+    super.key,
+    required this.surveyType,
+    this.statusFilters = const [],
+    this.ihmCompletionFilter,
+    this.jobCompletionFilter,
+    this.titleOverride,
+  });
 
   @override
   State<SurveyJobListScreen> createState() => _SurveyJobListScreenState();
@@ -57,6 +69,8 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
 
   AppThemeColors get _theme => context.read<ThemeNotifier>().colors;
   bool get _isDarkTheme => context.read<ThemeNotifier>().isDarkMode;
+  bool get _isAllSurveyTypes => widget.surveyType == 'All Surveys';
+  String get _screenTitle => widget.titleOverride ?? '${widget.surveyType} Jobs';
 
   @override
   void initState() {
@@ -71,9 +85,18 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
   }
 
   List<SurveyJob> get _filteredJobs {
-    if (_searchQuery.isEmpty) return jobs;
+    final normalizedStatuses = widget.statusFilters
+        .map((status) => status.toLowerCase())
+        .toSet();
+    final statusFiltered = normalizedStatuses.isEmpty
+        ? jobs
+        : jobs
+            .where((job) => normalizedStatuses.contains(job.status.toLowerCase()))
+            .toList();
+
+    if (_searchQuery.isEmpty) return statusFiltered;
     final q = _searchQuery.toLowerCase();
-    return jobs.where((j) {
+    return statusFiltered.where((j) {
       return j.jobNumber.toLowerCase().contains(q) ||
           (j.clientName ?? '').toLowerCase().contains(q) ||
           (j.vesselName ?? '').toLowerCase().contains(q) ||
@@ -82,11 +105,13 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
     }).toList();
   }
 
-  void _openJob(SurveyJob job) {
+  Future<void> _openJob(SurveyJob job) async {
     print('OPEN JOB ID = ${job.id}');
 
-    if (widget.surveyType == 'IHM Survey') {
-      Navigator.push(
+    final moduleType = job.moduleType.toLowerCase();
+    if (widget.surveyType == 'IHM Survey' ||
+        (_isAllSurveyTypes && moduleType.contains('ihm'))) {
+      await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => IHMSurveyScreen(userId: userId, job: job),
@@ -95,7 +120,7 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
       return;
     }
 
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => ExSurveyScreen(job: job)),
     );
@@ -352,11 +377,38 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
       isAdmin =
           role.toLowerCase() == 'admin' || role.toLowerCase() == 'manager';
 
-      final cachedJobs = await SurveyJobOfflineService.getCachedSurveyJobs(
-        surveyType: widget.surveyType,
-        isAdmin: isAdmin,
-        userId: userId,
-      );
+      final hasIhmCompletionFilter =
+          widget.ihmCompletionFilter != null &&
+          widget.ihmCompletionFilter!.trim().isNotEmpty;
+      final cachedJobs = hasIhmCompletionFilter
+          ? await SurveyJobOfflineService.getCachedSurveyJobs(
+              surveyType: widget.surveyType,
+              isAdmin: isAdmin,
+              userId: userId,
+              ihmCompletionFilter: widget.ihmCompletionFilter,
+              jobCompletionFilter: widget.jobCompletionFilter,
+            )
+          : _isAllSurveyTypes
+          ? [
+              ...await SurveyJobOfflineService.getCachedSurveyJobs(
+                surveyType: 'IHM Survey',
+                isAdmin: isAdmin,
+                userId: userId,
+                jobCompletionFilter: widget.jobCompletionFilter,
+              ),
+              ...await SurveyJobOfflineService.getCachedSurveyJobs(
+                surveyType: 'Ex-Survey',
+                isAdmin: isAdmin,
+                userId: userId,
+                jobCompletionFilter: widget.jobCompletionFilter,
+              ),
+            ]
+          : await SurveyJobOfflineService.getCachedSurveyJobs(
+              surveyType: widget.surveyType,
+              isAdmin: isAdmin,
+              userId: userId,
+              jobCompletionFilter: widget.jobCompletionFilter,
+            );
 
       if (cachedJobs.isNotEmpty && mounted) {
         setState(() {
@@ -384,11 +436,29 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
         }
       }
 
-      final result = await SurveyJobOfflineService.getSurveyJobsByType(
-        surveyType: widget.surveyType,
-        isAdmin: isAdmin,
-        userId: userId,
-      );
+      final result = _isAllSurveyTypes
+          ? [
+              ...await SurveyJobOfflineService.getSurveyJobsByType(
+                surveyType: 'IHM Survey',
+                isAdmin: isAdmin,
+                userId: userId,
+                ihmCompletionFilter: widget.ihmCompletionFilter,
+                jobCompletionFilter: widget.jobCompletionFilter,
+              ),
+              ...await SurveyJobOfflineService.getSurveyJobsByType(
+                surveyType: 'Ex-Survey',
+                isAdmin: isAdmin,
+                userId: userId,
+                jobCompletionFilter: widget.jobCompletionFilter,
+              ),
+            ]
+          : await SurveyJobOfflineService.getSurveyJobsByType(
+              surveyType: widget.surveyType,
+              isAdmin: isAdmin,
+              userId: userId,
+              ihmCompletionFilter: widget.ihmCompletionFilter,
+              jobCompletionFilter: widget.jobCompletionFilter,
+            );
 
       if (!mounted) return;
       setState(() {
@@ -1812,7 +1882,7 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${widget.surveyType} Jobs',
+                      _screenTitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -2058,8 +2128,8 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
               _searchQuery.isNotEmpty
                   ? 'No jobs match your search'
                   : isAdmin
-                  ? 'No ${widget.surveyType} jobs created yet.'
-                  : 'No assigned ${widget.surveyType} jobs found.',
+                  ? 'No $_screenTitle found.'
+                  : 'No assigned $_screenTitle found.',
               style: TextStyle(
                 color: theme.textPrimary,
                 fontSize: 16,

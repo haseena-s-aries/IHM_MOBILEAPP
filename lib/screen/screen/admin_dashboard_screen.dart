@@ -1,12 +1,16 @@
 import 'package:Auras/ThemeNotifier.dart';
+import 'package:Auras/model/PendingUser.dart';
 import 'package:Auras/model/TotalCertificateCountDto.dart';
+import 'package:Auras/model/vessel.dart';
 import 'package:Auras/screen/screen/Loadout_certificate_screen.dart';
 import 'package:Auras/screen/screen/PendingApprovalsScreen.dart';
 import 'package:Auras/screen/screen/Seafastening_certificate_screen.dart';
 import 'package:Auras/screen/screen/TaskManager_screen.dart';
 import 'package:Auras/screen/screen/Towage_certificate_screen.dart';
+import 'package:Auras/screen/screen/assigned_reports_screen.dart';
 import 'package:Auras/screen/screen/changepassword_screen.dart'
     show ChangePasswordScreen;
+import 'package:Auras/screen/screen/ihm_reports_screen.dart';
 import 'package:Auras/screen/screen/pdf_viewer_screen.dart';
 import 'package:Auras/screen/screen/profile_screen.dart';
 import 'package:Auras/screen/screen/survey_job_list_screen.dart';
@@ -26,6 +30,11 @@ class SurveyDashboardStats {
   final int submittedJobs;
   final int approvedJobs;
   final int closedJobs;
+  final int liveJobs;
+  final int completedJobs;
+  final int ihmLiveJobs;
+  final int exSurveyLiveJobs;
+  final int exSurveyReports;
 
   const SurveyDashboardStats({
     this.totalSurveyJobs = 0,
@@ -34,8 +43,15 @@ class SurveyDashboardStats {
     this.submittedJobs = 0,
     this.approvedJobs = 0,
     this.closedJobs = 0,
+    this.liveJobs = 0,
+    this.completedJobs = 0,
+    this.ihmLiveJobs = 0,
+    this.exSurveyLiveJobs = 0,
+    this.exSurveyReports = 0,
   });
 }
+
+enum _AurasTone { green, greenDark, blue, violet, amber, coral, soon }
 
 class AdminDashboardScreen extends StatefulWidget {
   final Map<String, dynamic> user;
@@ -59,17 +75,24 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       _isAdmin || _projectName.isEmpty || _projectName.contains('all');
 
   bool get _hasAurasAccess =>
-      _hasAllProjectAccess || _projectName.contains('auras');
+      _hasAllProjectAccess || _projectName.contains('auras') || _hasManagedProject('auras');
 
   bool get _hasIhmAccess =>
-      _hasAllProjectAccess || _projectName.contains('ihm');
+      _hasAllProjectAccess || _projectName.contains('ihm') || _hasManagedProject('ihm');
 
   bool get _hasExSurveyAccess =>
-      _hasAllProjectAccess || _projectName.contains('ex');
+      _hasAllProjectAccess || _projectName.contains('ex') || _hasManagedProject('ex');
 
   bool get isSurveyor => _role == 'surveyor';
 
   bool get isAdminOrManager => _role == 'admin' || _role == 'manager';
+
+  bool _hasManagedProject(String needle) {
+    return _manageableProjects.any((project) {
+      final text = '${project.name} ${project.code ?? ''}'.toLowerCase();
+      return text.contains(needle);
+    });
+  }
 
   String get _displayName {
     final candidates = [
@@ -85,12 +108,44 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return isSurveyor ? 'Surveyor' : 'Administrator';
   }
 
+  bool _isIhmUser(dynamic user) {
+    final text = _userScopeText(user);
+    return text.contains('ihm');
+  }
+
+  bool _isExSurveyUser(dynamic user) {
+    final text = _userScopeText(user);
+    return text.contains('ex');
+  }
+
+  String _userScopeText(dynamic user) {
+    if (user is Map) {
+      return [
+        user['projectName'],
+        user['ProjectName'],
+        user['role'],
+        user['Role'],
+        user['roleName'],
+        user['RoleName'],
+      ].whereType<Object>().map((x) => x.toString().toLowerCase()).join(' ');
+    }
+    return user.toString().toLowerCase();
+  }
+
   int _currentIndex = 0;
   List<Widget>? _pages;
 
   CertificateReport? report;
   bool isLoading = true;
   int _pendingCount = 0;
+  int _totalUsers = 0;
+  int _ihmUsersCount = 0;
+  int _exSurveyUsersCount = 0;
+  int _ihmReportsCount = 0;
+  int _exSurveyReportsCount = 0;
+  List<ProjectOption> _manageableProjects = [];
+  List<Vessel> _dashboardVessels = [];
+  List<PendingUser> _pendingUsers = [];
 
   @override
   void initState() {
@@ -104,6 +159,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       final users = await ApiService.fetchPendingUsers();
       if (!mounted) return;
       setState(() {
+        _pendingUsers = users;
         _pendingCount = users.length;
       });
     } catch (e) {
@@ -125,19 +181,134 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             )
           : await ApiService.fetchCertificateReport();
 
-      final ihmJobs = await ApiService.fetchSurveyJobsByType(
-        surveyType: 'IHM Survey',
-        isAdmin: !isSurveyor,
-        userId: userId,
-      );
+      var stats = const SurveyDashboardStats();
 
-      final exJobs = await ApiService.fetchSurveyJobsByType(
-        surveyType: 'Ex-Survey',
-        isAdmin: !isSurveyor,
-        userId: userId,
-      );
+      if (isSurveyor) {
+        final summary = await ApiService.fetchSurveyorDashboardSummary();
+        stats = SurveyDashboardStats(
+          liveJobs: summary['liveJobs'] ?? 0,
+          completedJobs: summary['completedJobs'] ?? 0,
+          ihmLiveJobs: summary['liveJobs'] ?? 0,
+        );
+        await prefs.setInt('surveyorDashboardLiveJobs', stats.liveJobs);
+        await prefs.setInt(
+          'surveyorDashboardCompletedJobs',
+          stats.completedJobs,
+        );
+      } else {
+        try {
+          _manageableProjects = await ApiService.fetchManageableProjects();
+          await prefs.setString(
+            'dashboardManageableProjects',
+            _manageableProjects.map((project) => project.name).join('|'),
+          );
+        } catch (_) {
+          final cachedProjects =
+              prefs.getString('dashboardManageableProjects') ?? '';
+          _manageableProjects = cachedProjects
+              .split('|')
+              .where((name) => name.trim().isNotEmpty)
+              .map((name) => ProjectOption(id: 0, name: name.trim()))
+              .toList();
+        }
 
-      final allSurveyJobs = [...ihmJobs, ...exJobs];
+        final summary = await ApiService.fetchSurveySummary();
+        final ihmJobs = await ApiService.fetchSurveyJobsByType(
+          surveyType: 'IHM Survey',
+          isAdmin: true,
+          userId: userId,
+        );
+
+        final exJobs = await ApiService.fetchSurveyJobsByType(
+          surveyType: 'Ex-Survey',
+          isAdmin: true,
+          userId: userId,
+        );
+
+        final allSurveyJobs = [...ihmJobs, ...exJobs];
+
+        stats = SurveyDashboardStats(
+          totalSurveyJobs: summary['totalSurveyJobs'] ?? allSurveyJobs.length,
+          ihmSurveyJobs: summary['ihmSurveyJobs'] ?? ihmJobs.length,
+          exSurveyJobs: summary['exSurveyJobs'] ?? exJobs.length,
+          submittedJobs: summary['submittedJobs'] ?? 0,
+          approvedJobs: summary['approvedJobs'] ?? 0,
+          closedJobs: summary['closedJobs'] ?? 0,
+          liveJobs: summary['liveJobs'] ?? 0,
+          completedJobs: summary['completedJobs'] ?? 0,
+          ihmLiveJobs: summary['ihmLiveJobs'] ?? summary['liveJobs'] ?? 0,
+          exSurveyLiveJobs: summary['exSurveyLiveJobs'] ?? 0,
+          exSurveyReports: summary['exSurveyReports'] ?? 0,
+        );
+
+        try {
+          final vessels = await ApiService.fetchVessels();
+          final uniqueVessels = <int, Vessel>{};
+          for (final vessel in vessels) {
+            uniqueVessels[vessel.id] = vessel;
+          }
+          _dashboardVessels = uniqueVessels.values.toList();
+          await prefs.setInt('dashboardVesselsCount', _dashboardVessels.length);
+        } catch (_) {
+          _dashboardVessels = [];
+        }
+
+        try {
+          final savedReports = await ApiService.fetchSavedReports();
+          final ihmReportIds = <int>{};
+          for (final report in savedReports) {
+            final type = (report['reportType'] ?? report['ReportType'] ?? '')
+                .toString()
+                .toLowerCase();
+            final id = int.tryParse(
+              (report['id'] ?? report['Id'] ?? '').toString(),
+            );
+            if (type == 'ihm' && id != null && id > 0) {
+              ihmReportIds.add(id);
+            }
+          }
+          _ihmReportsCount = ihmReportIds.length;
+          final exReportIds = <int>{};
+          for (final report in savedReports) {
+            final type = (report['reportType'] ?? report['ReportType'] ?? '')
+                .toString()
+                .toLowerCase();
+            final id = int.tryParse(
+              (report['id'] ?? report['Id'] ?? '').toString(),
+            );
+            if (type == 'exsurvey' && id != null && id > 0) {
+              exReportIds.add(id);
+            }
+          }
+          _exSurveyReportsCount = exReportIds.length;
+          await prefs.setInt('dashboardIhmReportsCount', _ihmReportsCount);
+          await prefs.setInt(
+            'dashboardExSurveyReportsCount',
+            _exSurveyReportsCount,
+          );
+        } catch (_) {
+          _ihmReportsCount =
+              prefs.getInt('dashboardIhmReportsCount') ?? _ihmReportsCount;
+          _exSurveyReportsCount =
+              prefs.getInt('dashboardExSurveyReportsCount') ??
+              _exSurveyReportsCount;
+        }
+
+        try {
+          final users = await ApiService.getAllUsers();
+          _totalUsers = users.length;
+          _ihmUsersCount = users.where(_isIhmUser).length;
+          _exSurveyUsersCount = users.where(_isExSurveyUser).length;
+          await prefs.setInt('dashboardTotalUsers', _totalUsers);
+          await prefs.setInt('dashboardIhmUsers', _ihmUsersCount);
+          await prefs.setInt('dashboardExUsers', _exSurveyUsersCount);
+        } catch (_) {
+          _totalUsers = prefs.getInt('dashboardTotalUsers') ?? _totalUsers;
+          _ihmUsersCount = prefs.getInt('dashboardIhmUsers') ?? _ihmUsersCount;
+          _exSurveyUsersCount =
+              prefs.getInt('dashboardExUsers') ?? _exSurveyUsersCount;
+        }
+      }
 
       if (!isSurveyor) {
         await prefs.setInt('totalCertificates', result.totalCertificates);
@@ -149,18 +320,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       if (!mounted) return;
       setState(() {
         report = result;
-        surveyStats = SurveyDashboardStats(
-          totalSurveyJobs: allSurveyJobs.length,
-          ihmSurveyJobs: ihmJobs.length,
-          exSurveyJobs: exJobs.length,
-          submittedJobs: allSurveyJobs
-              .where((x) => x.status == 'Submitted')
-              .length,
-          approvedJobs: allSurveyJobs
-              .where((x) => x.status == 'Approved')
-              .length,
-          closedJobs: allSurveyJobs.where((x) => x.status == 'Closed').length,
-        );
+        surveyStats = stats;
         isLoading = false;
         _pages = const [];
       });
@@ -171,6 +331,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ? 0
           : prefs.getInt('seaFasteningCount') ?? 0;
       final loadout = isSurveyor ? 0 : prefs.getInt('loadoutCount') ?? 0;
+      final liveJobs = prefs.getInt('surveyorDashboardLiveJobs') ?? 0;
+      final completedJobs =
+          prefs.getInt('surveyorDashboardCompletedJobs') ?? 0;
+      final cachedVessels = prefs.getInt('dashboardVesselsCount') ?? 0;
+      final cachedIhmReports = prefs.getInt('dashboardIhmReportsCount') ?? 0;
+      final cachedExReports =
+          prefs.getInt('dashboardExSurveyReportsCount') ?? 0;
+      final cachedUsers = prefs.getInt('dashboardTotalUsers') ?? 0;
+      final cachedIhmUsers = prefs.getInt('dashboardIhmUsers') ?? 0;
+      final cachedExUsers = prefs.getInt('dashboardExUsers') ?? 0;
 
       if (!mounted) return;
       setState(() {
@@ -180,7 +350,29 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           seaFasteningCount: seaFastening,
           loadoutCount: loadout,
         );
-        surveyStats = const SurveyDashboardStats();
+        surveyStats = isSurveyor
+            ? SurveyDashboardStats(
+                liveJobs: liveJobs,
+                completedJobs: completedJobs,
+              )
+            : const SurveyDashboardStats();
+        if (!isSurveyor) {
+          _totalUsers = cachedUsers;
+          _ihmUsersCount = cachedIhmUsers;
+          _exSurveyUsersCount = cachedExUsers;
+          _ihmReportsCount = cachedIhmReports;
+          _exSurveyReportsCount = cachedExReports;
+          if (_dashboardVessels.isEmpty && cachedVessels > 0) {
+            _dashboardVessels = List.generate(
+              cachedVessels,
+              (index) => Vessel(
+                id: 0,
+                vesselName: 'Cached vessel ${index + 1}',
+                status: 'Available',
+              ),
+            );
+          }
+        }
         isLoading = false;
         _pages = const [];
       });
@@ -192,8 +384,37 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
+  void _openLiveSurveyJobs() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const SurveyJobListScreen(
+          surveyType: 'IHM Survey',
+          titleOverride: 'Live Jobs',
+          ihmCompletionFilter: 'live',
+        ),
+      ),
+    );
+  }
+
+  void _openCompletedSurveyJobs() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const SurveyJobListScreen(
+          surveyType: 'IHM Survey',
+          titleOverride: 'Completed Survey Jobs',
+          ihmCompletionFilter: 'completed',
+        ),
+      ),
+    );
+  }
+
   Widget _buildCurrentPage() {
     if (_currentIndex == 0) return _buildHomePage();
+    if (isAdminOrManager && _currentIndex == 1) {
+      return UserManagerScreen(currentUser: widget.user, embedded: true);
+    }
     return _buildProfileSection();
   }
 
@@ -211,6 +432,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       );
     }
 
+    if (isSurveyor) {
+      return _buildSurveyorDashboard(themeNotifier.isDarkMode);
+    }
+
+    return _buildAdminManagerDashboard();
+
     return RefreshIndicator(
       onRefresh: () async {
         await SyncService.syncAllOfflineData();
@@ -226,7 +453,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             _buildCommandHeader(themeNotifier.isDarkMode),
             const SizedBox(height: 24),
             // ─── 3 HORIZONTAL QUICK-ACTION CARDS ───────────────────────────
-            Row(
+            if (!isSurveyor)
+              Row(
               children: [
                 // Card 1: Certificates (Loadout / Towage / Seafastening)
                 if (!isSurveyor && _hasAurasAccess)
@@ -343,127 +571,148 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             ),
             const SizedBox(height: 12),
 
-            Row(
-              children: [
-                _buildStatCard(
-                  "Survey Jobs",
-                  surveyStats.totalSurveyJobs,
-                  Icons.assignment_turned_in,
-                  Colors.teal,
+            if (isSurveyor) ...[
+              Row(
+                children: [
+                  _buildStatCard(
+                    "Live Jobs",
+                    surveyStats.liveJobs,
+                    Icons.work_history,
+                    Colors.teal,
+                    onTap: _openLiveSurveyJobs,
+                  ),
+                  _buildStatCard(
+                    "Completed Survey Jobs",
+                    surveyStats.completedJobs,
+                    Icons.verified,
+                    Colors.green,
+                    onTap: _openCompletedSurveyJobs,
+                  ),
+                ],
+              ),
+            ] else ...[
+              Row(
+                children: [
+                  _buildStatCard(
+                    "Survey Jobs",
+                    surveyStats.totalSurveyJobs,
+                    Icons.assignment_turned_in,
+                    Colors.teal,
+                  ),
+                  _buildStatCard(
+                    "IHM Survey",
+                    surveyStats.ihmSurveyJobs,
+                    Icons.inventory_2,
+                    Colors.indigo,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _buildStatCard(
+                    "Ex-Survey",
+                    surveyStats.exSurveyJobs,
+                    Icons.electrical_services,
+                    Colors.deepOrange,
+                  ),
+                  _buildStatCard(
+                    "Submitted",
+                    surveyStats.submittedJobs,
+                    Icons.cloud_done,
+                    Colors.cyan,
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
+              Text(
+                'Quick Actions',
+                style: TextStyle(
+                  color: colors.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
                 ),
-                _buildStatCard(
-                  "IHM Survey",
-                  surveyStats.ihmSurveyJobs,
-                  Icons.inventory_2,
-                  Colors.indigo,
+              ),
+              const SizedBox(height: 12),
+
+              if (_hasIhmAccess)
+                _buildActionTile(
+                  icon: Icons.inventory_2,
+                  title: 'IHM Survey Jobs',
+                  subtitle: 'Open all IHM survey jobs',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const SurveyJobListScreen(
+                          surveyType: 'IHM Survey',
+                        ),
+                      ),
+                    );
+                  },
+                ),
+
+              if (_hasExSurveyAccess)
+                _buildActionTile(
+                  icon: Icons.electrical_services,
+                  title: 'Ex-Survey Jobs',
+                  subtitle: 'Open all Ex-Survey jobs',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const SurveyJobListScreen(
+                          surveyType: 'Ex-Survey',
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              if (_hasAurasAccess) ...[
+                _buildActionTile(
+                  icon: Icons.directions_boat,
+                  title: 'Vessel Master',
+                  subtitle: 'Create and manage vessel information',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const VesselMasterScreen(),
+                      ),
+                    );
+                  },
+                ),
+
+                _buildActionTile(
+                  icon: Icons.fact_check,
+                  title: 'Task Manager',
+                  subtitle: 'Manage tasks and assignments',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const TaskManagerScreen(),
+                      ),
+                    );
+                  },
+                ),
+
+                _buildActionTile(
+                  icon: Icons.group,
+                  title: 'User Manager',
+                  subtitle: 'Manage users and approvals',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const UserManagerScreen(),
+                      ),
+                    );
+                  },
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                _buildStatCard(
-                  "Ex-Survey",
-                  surveyStats.exSurveyJobs,
-                  Icons.electrical_services,
-                  Colors.deepOrange,
-                ),
-                _buildStatCard(
-                  "Submitted",
-                  surveyStats.submittedJobs,
-                  Icons.cloud_done,
-                  Colors.cyan,
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 24),
-
-            Text(
-              'Quick Actions',
-              style: TextStyle(
-                color: colors.textPrimary,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            if (_hasIhmAccess)
-              _buildActionTile(
-                icon: Icons.inventory_2,
-                title: 'IHM Survey Jobs',
-                subtitle: 'Open all IHM survey jobs',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const SurveyJobListScreen(
-                        surveyType: 'IHM Survey',
-                      ),
-                    ),
-                  );
-                },
-              ),
-
-            if (_hasExSurveyAccess)
-              _buildActionTile(
-                icon: Icons.electrical_services,
-                title: 'Ex-Survey Jobs',
-                subtitle: 'Open all Ex-Survey jobs',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const SurveyJobListScreen(
-                        surveyType: 'Ex-Survey',
-                      ),
-                    ),
-                  );
-                },
-              ),
-            if (!isSurveyor && _hasAurasAccess) ...[
-              _buildActionTile(
-                icon: Icons.directions_boat,
-                title: 'Vessel Master',
-                subtitle: 'Create and manage vessel information',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const VesselMasterScreen(),
-                    ),
-                  );
-                },
-              ),
-
-              _buildActionTile(
-                icon: Icons.fact_check,
-                title: 'Task Manager',
-                subtitle: 'Manage tasks and assignments',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const TaskManagerScreen(),
-                    ),
-                  );
-                },
-              ),
-
-              _buildActionTile(
-                icon: Icons.group,
-                title: 'User Manager',
-                subtitle: 'Manage users and approvals',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const UserManagerScreen(),
-                    ),
-                  );
-                },
-              ),
             ],
           ],
         ),
@@ -472,6 +721,1767 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   // ─── NEW: Top 3-card horizontal section ──────────────────────────────────
+
+  Widget _buildAdminManagerDashboard() {
+    const bg = Color(0xFFF3F4F0);
+    final canSeeIhm = _hasIhmAccess;
+    final canSeeEx = _hasExSurveyAccess;
+    final canSeeAuras = _hasAurasAccess;
+    final canSeeUsers = _role != 'client';
+    final canSeeVessels = _role != 'client';
+    final ihmJobs = canSeeIhm ? surveyStats.ihmSurveyJobs : 0;
+    final liveIhmJobs = canSeeIhm ? surveyStats.ihmLiveJobs : 0;
+    final exJobs = canSeeEx ? surveyStats.exSurveyJobs : 0;
+    final liveExJobs = canSeeEx ? surveyStats.exSurveyLiveJobs : 0;
+    final exReportsCount = canSeeEx
+        ? (_exSurveyReportsCount > 0
+              ? _exSurveyReportsCount
+              : surveyStats.exSurveyReports)
+        : 0;
+    final submittedJobs = surveyStats.submittedJobs;
+    final attentionJobs = liveIhmJobs;
+    final vesselCount = _dashboardVessels.length;
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        await SyncService.syncAllOfflineData();
+        await SyncService.syncFromServerToLocal();
+        await _fetchPendingCount();
+        await _fetchCertificateReport();
+      },
+      child: Container(
+        color: bg,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 26),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildAurasTopProfile(),
+              const SizedBox(height: 16),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final width = constraints.maxWidth;
+                  final crossAxisCount = width >= 1120
+                      ? 4
+                      : width >= 700
+                      ? 2
+                      : 1;
+                  final cards = <Widget>[
+                    if (canSeeIhm)
+                      _adminMetricCard(
+                        tone: _AurasTone.blue,
+                        icon: Icons.assignment_turned_in_rounded,
+                        title: 'IHM Survey Jobs',
+                        value: ihmJobs,
+                        subtitle: '$submittedJobs submitted',
+                      ),
+                    if (canSeeAuras)
+                      _adminMetricCard(
+                        tone: _AurasTone.green,
+                        icon: Icons.verified_rounded,
+                        title: 'Auras Certificates',
+                        value: report?.totalCertificates ?? 0,
+                        subtitle: '${report?.towageCount ?? 0} towage',
+                      ),
+                    if (canSeeUsers)
+                      _adminMetricCard(
+                        tone: _AurasTone.violet,
+                        icon: Icons.groups_rounded,
+                        title: 'Active Users',
+                        value: _totalUsers,
+                        subtitle:
+                            '${_projectName.isEmpty ? 'All Projects' : _projectName} roles',
+                      ),
+                    if (canSeeUsers)
+                      _adminMetricCard(
+                        tone: _AurasTone.amber,
+                        icon: Icons.warning_amber_rounded,
+                        title: 'Attention',
+                        value: attentionJobs,
+                        subtitle: 'Assigned, not started',
+                      ),
+                    if (canSeeVessels)
+                      _adminMetricCard(
+                        tone: _AurasTone.green,
+                        icon: Icons.directions_boat_filled_rounded,
+                        title: 'Vessels',
+                        value: vesselCount,
+                        subtitle: 'Created vessels',
+                      ),
+                    if (canSeeEx)
+                      _adminMetricCard(
+                        tone: _AurasTone.blue,
+                        icon: Icons.assignment_rounded,
+                        title: 'EX-Survey Jobs',
+                        value: exJobs,
+                        subtitle: 'EX-Survey jobs',
+                      ),
+                    if (_isAdmin)
+                      _adminMetricCard(
+                        tone: _AurasTone.violet,
+                        icon: Icons.groups_rounded,
+                        title: 'IHM Users',
+                        value: _ihmUsersCount,
+                        subtitle: 'IHM roles',
+                      ),
+                    if (_isAdmin)
+                      _adminMetricCard(
+                        tone: _AurasTone.green,
+                        icon: Icons.group_add_rounded,
+                        title: 'EX-Survey Users',
+                        value: _exSurveyUsersCount,
+                        subtitle: 'EX-Survey roles',
+                      ),
+                  ];
+
+                  return GridView.count(
+                    crossAxisCount: crossAxisCount,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                    childAspectRatio: width >= 700 ? 2.25 : 2.7,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    children: cards,
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final width = constraints.maxWidth;
+                  final crossAxisCount = width >= 980
+                      ? 3
+                      : width >= 660
+                      ? 2
+                      : 1;
+                  final appCards = <Widget>[
+                    if (canSeeAuras)
+                      _adminAppCard(
+                        primary: true,
+                        icon: Icons.shield_rounded,
+                        iconTone: _AurasTone.greenDark,
+                        badge: 'Active',
+                        badgeTone: _AurasTone.green,
+                        title: 'Auras SurveyApp',
+                        description:
+                            'Certificates Creation For Towage,Seafastening,and Loadout',
+                        meta: [
+                          '${report?.totalCertificates ?? 0} certificates',
+                          '$_totalUsers users',
+                        ],
+                        actionLabel: 'Open workspace',
+                        actionDark: true,
+                        onTap: () => _showCertificateDialog(context),
+                      ),
+                    if (canSeeIhm)
+                      _adminAppCard(
+                        icon: Icons.work_rounded,
+                        iconTone: _AurasTone.blue,
+                        badge: 'Beta',
+                        badgeTone: _AurasTone.violet,
+                        title: 'IHM All Jobs',
+                        description:
+                            'View all IHM survey jobs and job details.',
+                        meta: [
+                          '$ihmJobs job${ihmJobs == 1 ? '' : 's'}',
+                          '$submittedJobs submitted',
+                        ],
+                        actionLabel: 'Open jobs',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const SurveyJobListScreen(
+                              surveyType: 'IHM Survey',
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (canSeeIhm)
+                      _adminAppCard(
+                        icon: Icons.description_rounded,
+                        iconTone: _AurasTone.greenDark,
+                        badge: 'Reports',
+                        badgeTone: _AurasTone.green,
+                        title: 'IHM Reports',
+                        description: 'View saved IHM survey reports.',
+                        meta: [
+                          '$_ihmReportsCount report${_ihmReportsCount == 1 ? '' : 's'}',
+                        ],
+                        actionLabel: 'Open reports',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const IhmReportsScreen(),
+                          ),
+                        ),
+                      ),
+                    if (canSeeIhm && !_isAdmin)
+                      _adminAppCard(
+                        icon: Icons.sync_rounded,
+                        iconTone: _AurasTone.coral,
+                        badge: 'Live',
+                        badgeTone: _AurasTone.soon,
+                        title: 'IHM Live Jobs',
+                        description: 'Ongoing IHM jobs currently in progress.',
+                        meta: [
+                          '$liveIhmJobs ongoing job${liveIhmJobs == 1 ? '' : 's'}',
+                        ],
+                        actionLabel: 'Open live jobs',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const SurveyJobListScreen(
+                              surveyType: 'IHM Survey',
+                              titleOverride: 'Live Jobs',
+                              ihmCompletionFilter: 'live',
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (_isAdmin && (canSeeIhm || canSeeEx))
+                      _adminLiveJobsCard(
+                        ihmLiveJobs: liveIhmJobs,
+                        exSurveyLiveJobs: liveExJobs,
+                        canOpenIhm: canSeeIhm,
+                        canOpenExSurvey: canSeeEx,
+                      ),
+                    if (canSeeEx)
+                      _adminAppCard(
+                        icon: Icons.assignment_rounded,
+                        iconTone: _AurasTone.blue,
+                        badge: 'EX-Survey',
+                        badgeTone: _AurasTone.violet,
+                        title: 'EX-Survey All Jobs',
+                        description:
+                            'View all accessible EX-Survey jobs and job details.',
+                        meta: [
+                          '$exJobs job${exJobs == 1 ? '' : 's'}',
+                        ],
+                        actionLabel: 'Open jobs',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const SurveyJobListScreen(
+                              surveyType: 'Ex-Survey',
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (canSeeEx)
+                      _adminAppCard(
+                        icon: Icons.description_rounded,
+                        iconTone: _AurasTone.greenDark,
+                        badge: 'Reports',
+                        badgeTone: _AurasTone.green,
+                        title: 'EX-Survey Reports',
+                        description: 'View saved EX-Survey report documents.',
+                        meta: [
+                          '$exReportsCount report${exReportsCount == 1 ? '' : 's'}',
+                        ],
+                        actionLabel: 'Open reports',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                const IhmReportsScreen(initialCategory: 'exsurvey'),
+                          ),
+                        ),
+                      ),
+                    if (canSeeEx && !_isAdmin)
+                      _adminAppCard(
+                        icon: Icons.sync_rounded,
+                        iconTone: _AurasTone.coral,
+                        badge: 'Live',
+                        badgeTone: _AurasTone.soon,
+                        title: 'EX-Survey Live Jobs',
+                        description:
+                            'Ongoing EX-Survey jobs currently in progress.',
+                        meta: [
+                          '$liveExJobs ongoing job${liveExJobs == 1 ? '' : 's'}',
+                        ],
+                        actionLabel: 'Open live jobs',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const SurveyJobListScreen(
+                              surveyType: 'Ex-Survey',
+                              titleOverride: 'EX-Survey Live Jobs',
+                              jobCompletionFilter: 'live',
+                            ),
+                          ),
+                        ),
+                      ),
+                  ];
+
+                  return GridView.count(
+                    crossAxisCount: crossAxisCount,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                    childAspectRatio: width >= 980
+                        ? 1.55
+                        : width >= 660
+                        ? 1.45
+                        : 1.32,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    children: appCards,
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final stack = constraints.maxWidth < 860;
+                  if (stack) {
+                    return Column(
+                      children: [
+                        if (canSeeVessels) _vesselPanel(),
+                        if (canSeeVessels) const SizedBox(height: 16),
+                        _recentActivityPanel(),
+                      ],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (canSeeVessels) Expanded(flex: 6, child: _vesselPanel()),
+                      if (canSeeVessels) const SizedBox(width: 16),
+                      Expanded(flex: 5, child: _recentActivityPanel()),
+                    ],
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Color _toneColor(_AurasTone tone) {
+    switch (tone) {
+      case _AurasTone.green:
+        return const Color(0xFF007F67);
+      case _AurasTone.greenDark:
+        return const Color(0xFF06231D);
+      case _AurasTone.blue:
+        return const Color(0xFF3B7BD6);
+      case _AurasTone.violet:
+        return const Color(0xFF4D4FB2);
+      case _AurasTone.amber:
+        return const Color(0xFFD88C21);
+      case _AurasTone.coral:
+        return const Color(0xFFE36D4E);
+      case _AurasTone.soon:
+        return const Color(0xFF5D625F);
+    }
+  }
+
+  Color _toneSoft(_AurasTone tone) {
+    switch (tone) {
+      case _AurasTone.green:
+      case _AurasTone.greenDark:
+        return const Color(0xFFD8F1E9);
+      case _AurasTone.blue:
+        return const Color(0xFFE8F0FF);
+      case _AurasTone.violet:
+        return const Color(0xFFE9E9FB);
+      case _AurasTone.amber:
+        return const Color(0xFFFFF0D7);
+      case _AurasTone.coral:
+        return const Color(0xFFFFE8DF);
+      case _AurasTone.soon:
+        return const Color(0xFFEEEEEA);
+    }
+  }
+
+  Widget _buildAurasTopProfile() {
+    final email = widget.user['email']?.toString() ?? '';
+    final profileTitle = _isAdmin ? 'Administrator' : 'Manager';
+    final dashboardTitle = _isAdmin ? 'Admin Dashboard' : 'Manager Dashboard';
+    final initial = (_displayName.isNotEmpty ? _displayName[0] : 'A')
+        .toUpperCase();
+
+    return Row(
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: const Color(0xFF007F67),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: const Icon(Icons.shield_rounded, color: Colors.white),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'AURAS',
+                style: TextStyle(
+                  color: Color(0xFF06120F),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                ),
+              ),
+              Text(
+                dashboardTitle,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF6F7C77),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFDEDFD8)),
+          ),
+          child: const Icon(Icons.notifications_none, size: 19),
+        ),
+        const SizedBox(width: 10),
+        CircleAvatar(
+          backgroundColor: const Color(0xFF007F67),
+          child: Text(
+            initial,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                profileTitle,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF06120F),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 13,
+                ),
+              ),
+              Text(
+                email,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF6F7C77),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _adminMetricCard({
+    required _AurasTone tone,
+    required IconData icon,
+    required String title,
+    required int value,
+    required String subtitle,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: _aurasCardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: _toneSoft(tone),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Icon(icon, color: _toneColor(tone), size: 18),
+          ),
+          const Spacer(),
+          Text(
+            title.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF6F7C77),
+              fontSize: 10.5,
+              fontWeight: FontWeight.w900,
+              letterSpacing: .7,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            '$value',
+            style: const TextStyle(
+              color: Color(0xFF06120F),
+              fontSize: 29,
+              fontWeight: FontWeight.w900,
+              height: 1,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF6F7C77),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _adminAppCard({
+    required IconData icon,
+    required _AurasTone iconTone,
+    required String badge,
+    required _AurasTone badgeTone,
+    required String title,
+    required String description,
+    required List<String> meta,
+    required String actionLabel,
+    VoidCallback? onTap,
+    bool primary = false,
+    bool muted = false,
+    bool actionDark = false,
+  }) {
+    final actionEnabled = onTap != null;
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: _aurasCardDecoration(
+        borderColor: primary ? const Color(0xFF007F67) : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: iconTone == _AurasTone.greenDark
+                      ? const Color(0xFF007F67)
+                      : _toneSoft(iconTone),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  icon,
+                  color: iconTone == _AurasTone.greenDark
+                      ? Colors.white
+                      : _toneColor(iconTone),
+                  size: 21,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _toneSoft(badgeTone),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  badge.toUpperCase(),
+                  style: TextStyle(
+                    color: _toneColor(badgeTone),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF050F0D),
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            description.isEmpty ? ' ' : description,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF233632),
+              fontSize: 13,
+              height: 1.35,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const Spacer(),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.only(top: 14),
+            decoration: const BoxDecoration(
+              border: Border(top: BorderSide(color: Color(0xFFDEDFD8))),
+            ),
+            child: Wrap(
+              spacing: 18,
+              runSpacing: 6,
+              children: meta
+                  .map(
+                    (item) => Text(
+                      item,
+                      style: const TextStyle(
+                        color: Color(0xFF6F7C77),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 38,
+            child: ElevatedButton(
+              onPressed: actionEnabled ? onTap : null,
+              style: ElevatedButton.styleFrom(
+                elevation: 0,
+                backgroundColor: actionDark
+                    ? const Color(0xFF06231D)
+                    : const Color(0xFFE9E9FB),
+                disabledBackgroundColor: const Color(0xFFEEEEEA),
+                foregroundColor: actionDark
+                    ? Colors.white
+                    : const Color(0xFF4D4FB2),
+                disabledForegroundColor: const Color(0xFF777D79),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    actionLabel,
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  if (actionEnabled) ...[
+                    const SizedBox(width: 8),
+                    const Icon(Icons.arrow_forward_rounded, size: 17),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _adminLiveJobsCard({
+    required int ihmLiveJobs,
+    required int exSurveyLiveJobs,
+    required bool canOpenIhm,
+    required bool canOpenExSurvey,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: _aurasCardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: _toneSoft(_AurasTone.coral),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  Icons.sync_rounded,
+                  color: _toneColor(_AurasTone.coral),
+                  size: 21,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _toneSoft(_AurasTone.soon),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  'LIVE',
+                  style: TextStyle(
+                    color: _toneColor(_AurasTone.soon),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Live Jobs',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Color(0xFF050F0D),
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Ongoing jobs currently in progress across active survey projects.',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Color(0xFF233632),
+              fontSize: 13,
+              height: 1.35,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const Spacer(),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.only(top: 14),
+            decoration: const BoxDecoration(
+              border: Border(top: BorderSide(color: Color(0xFFDEDFD8))),
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final stack = constraints.maxWidth < 250;
+                final summaries = <Widget>[
+                  if (canOpenIhm)
+                    _liveSummaryTile(
+                      count: ihmLiveJobs,
+                      label: 'IHM live jobs',
+                    ),
+                  if (canOpenExSurvey)
+                    _liveSummaryTile(
+                      count: exSurveyLiveJobs,
+                      label: 'EX-Survey live jobs',
+                    ),
+                ];
+
+                if (stack) {
+                  return Column(
+                    children: [
+                      for (var i = 0; i < summaries.length; i++) ...[
+                        if (i > 0) const SizedBox(height: 8),
+                        summaries[i],
+                      ],
+                    ],
+                  );
+                }
+
+                return Row(
+                  children: [
+                    for (var i = 0; i < summaries.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 8),
+                      Expanded(child: summaries[i]),
+                    ],
+                  ],
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              if (canOpenIhm)
+                Expanded(
+                  child: _liveJobsActionButton(
+                    label: 'Open IHM',
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const SurveyJobListScreen(
+                          surveyType: 'IHM Survey',
+                          titleOverride: 'IHM Live Jobs',
+                          ihmCompletionFilter: 'live',
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              if (canOpenIhm && canOpenExSurvey) const SizedBox(width: 8),
+              if (canOpenExSurvey)
+                Expanded(
+                  child: _liveJobsActionButton(
+                    label: 'Open EX',
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const SurveyJobListScreen(
+                          surveyType: 'Ex-Survey',
+                          titleOverride: 'EX-Survey Live Jobs',
+                          jobCompletionFilter: 'live',
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _liveSummaryTile({
+    required int count,
+    required String label,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAF8),
+        border: Border.all(color: const Color(0xFFDEDFD8)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            count.toString(),
+            style: const TextStyle(
+              color: Color(0xFF050F0D),
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+              height: 1,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF6F7C77),
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _liveJobsActionButton({
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      height: 38,
+      child: ElevatedButton(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          elevation: 0,
+          backgroundColor: const Color(0xFFE9E9FB),
+          foregroundColor: const Color(0xFF4D4FB2),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.arrow_forward_rounded, size: 17),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _vesselPanel() {
+    final vessels = _dashboardVessels.take(4).toList();
+    return _adminPanel(
+      title: 'Vessel Master',
+      actionLabel: 'All vessels',
+      onAction: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const VesselMasterScreen()),
+      ),
+      child: vessels.isEmpty
+          ? _adminEmptyState(Icons.directions_boat_rounded, 'No vessels available')
+          : Column(children: vessels.map(_vesselRow).toList()),
+    );
+  }
+
+  Widget _vesselRow(Vessel vessel) {
+    final location = vessel.flag?.trim().isNotEmpty == true
+        ? vessel.flag!.trim()
+        : (vessel.portOfRegistry?.trim().isNotEmpty == true
+              ? vessel.portOfRegistry!.trim()
+              : 'Location unknown');
+    final status = vessel.status.trim().isEmpty ? 'Available' : vessel.status;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Color(0xFFDEDFD8))),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F2EE),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.directions_boat_filled_rounded,
+              color: Color(0xFF5F6A65),
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  vessel.vesselName.trim().isEmpty
+                      ? 'Unnamed vessel'
+                      : vessel.vesselName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF06120F),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  location,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF6F7C77),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: const Color(0xFFD8F1E9),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              status,
+              style: const TextStyle(
+                color: Color(0xFF007F67),
+                fontWeight: FontWeight.w900,
+                fontSize: 10,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _recentActivityPanel() {
+    final activities = <Widget>[
+      ..._pendingUsers.take(2).map(
+            (user) => _activityItem(
+              '${user.fullName} requested ${user.requestedRole} approval',
+              user.email,
+              _AurasTone.amber,
+            ),
+          ),
+      if ((report?.totalCertificates ?? 0) > 0)
+        _activityItem(
+          'Auras certificate records available',
+          '${report!.totalCertificates} certificates',
+          _AurasTone.green,
+        ),
+      if (_dashboardVessels.isNotEmpty)
+        _activityItem(
+          '${_dashboardVessels.first.vesselName} added to Vessel Master',
+          _dashboardVessels.first.flag ?? 'Vessel master',
+          _AurasTone.green,
+        ),
+    ].take(5).toList();
+
+    return _adminPanel(
+      title: 'Recent activity',
+      actionLabel: 'View all',
+      onAction: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AssignedReportsScreen(user: widget.user),
+        ),
+      ),
+      child: activities.isEmpty
+          ? _adminEmptyState(Icons.schedule_rounded, 'No recent activity available')
+          : Column(children: activities),
+    );
+  }
+
+  Widget _activityItem(String title, String meta, _AurasTone tone) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Color(0xFFDEDFD8))),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            margin: const EdgeInsets.only(top: 5),
+            decoration: BoxDecoration(
+              color: _toneColor(tone),
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF06120F),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  meta,
+                  style: const TextStyle(
+                    color: Color(0xFF6F7C77),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _adminPanel({
+    required String title,
+    required String actionLabel,
+    required VoidCallback onAction,
+    required Widget child,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: _aurasCardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF06120F),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: onAction,
+                child: Row(
+                  children: [
+                    Text(actionLabel),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.arrow_forward_rounded, size: 16),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _adminEmptyState(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 28),
+      child: Center(
+        child: Column(
+          children: [
+            Icon(icon, color: const Color(0xFF9AA5A0), size: 30),
+            const SizedBox(height: 8),
+            Text(
+              text,
+              style: const TextStyle(
+                color: Color(0xFF6F7C77),
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  BoxDecoration _aurasCardDecoration({Color? borderColor}) {
+    return BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(15),
+      border: Border.all(color: borderColor ?? const Color(0xFFDEDFD8)),
+      boxShadow: [
+        BoxShadow(
+          color: const Color(0xFF06120F).withOpacity(0.08),
+          blurRadius: 24,
+          offset: const Offset(0, 12),
+        ),
+        BoxShadow(
+          color: const Color(0xFF06120F).withOpacity(0.04),
+          blurRadius: 2,
+          offset: const Offset(0, 1),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSurveyorDashboard(bool isDark) {
+    final liveJobs = surveyStats.liveJobs;
+    final completedJobs = surveyStats.completedJobs;
+    final totalAssigned = liveJobs + completedJobs;
+    final successRate = totalAssigned == 0
+        ? 0
+        : ((completedJobs / totalAssigned) * 100).round();
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        await SyncService.syncAllOfflineData();
+        await SyncService.syncFromServerToLocal();
+        await _fetchCertificateReport();
+      },
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 32),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildCommandHeader(isDark),
+            const SizedBox(height: 18),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final stackCards = constraints.maxWidth < 620;
+                final liveCard = _buildLargeKpiCard(
+                  title: 'IHM Live Jobs',
+                  count: liveJobs,
+                  subtitle: 'Assigned & In Progress',
+                  icon: Icons.assignment_turned_in_rounded,
+                  gradient: const [Color(0xFF2563EB), Color(0xFF1D4ED8)],
+                  onTap: _openLiveSurveyJobs,
+                );
+                final completedCard = _buildLargeKpiCard(
+                  title: 'IHM Completed Jobs',
+                  count: completedJobs,
+                  subtitle: 'Successfully Completed',
+                  icon: Icons.check_circle_rounded,
+                  gradient: const [Color(0xFF16A34A), Color(0xFF15803D)],
+                  onTap: _openCompletedSurveyJobs,
+                );
+
+                if (stackCards) {
+                  return Column(
+                    children: [
+                      liveCard,
+                      const SizedBox(height: 16),
+                      completedCard,
+                    ],
+                  );
+                }
+
+                return Row(
+                  children: [
+                    Expanded(child: liveCard),
+                    const SizedBox(width: 16),
+                    Expanded(child: completedCard),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 24),
+            _dashboardSectionTitle("Today's Overview"),
+            const SizedBox(height: 12),
+            GridView.count(
+              crossAxisCount: MediaQuery.of(context).size.width < 720 ? 2 : 4,
+              childAspectRatio: MediaQuery.of(context).size.width < 420
+                  ? 1.05
+                  : 1.35,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              children: [
+                _buildSmallKpiCard(
+                  icon: Icons.assignment_turned_in,
+                  count: completedJobs,
+                  title: 'Surveys Done',
+                  subtitle: 'Completed Today',
+                  color: const Color(0xFF2563EB),
+                ),
+                _buildSmallKpiCard(
+                  icon: Icons.schedule,
+                  count: liveJobs,
+                  title: 'Pending Jobs',
+                  subtitle: 'Waiting to Start',
+                  color: const Color(0xFFF59E0B),
+                ),
+                _buildSmallKpiCard(
+                  icon: Icons.warning_amber,
+                  count: 0,
+                  title: 'Incomplete Jobs',
+                  subtitle: 'Needs Attention',
+                  color: const Color(0xFFDC2626),
+                ),
+                _buildSmallKpiCard(
+                  icon: Icons.today,
+                  count: 0,
+                  title: 'Due Today',
+                  subtitle: 'Deadline Today',
+                  color: const Color(0xFF7C3AED),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            _dashboardSectionTitle('Performance'),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final stackCards = constraints.maxWidth < 760;
+                final cards = [
+                  _buildPerformanceCard(
+                    title: 'Total Assigned',
+                    value: '$totalAssigned',
+                    subtitle: 'Live + completed jobs',
+                    icon: Icons.work_rounded,
+                    color: const Color(0xFF2563EB),
+                  ),
+                  _buildPerformanceCard(
+                    title: 'Average Completion Time',
+                    value: 'N/A',
+                    subtitle: 'Awaiting duration data',
+                    icon: Icons.timer_rounded,
+                    color: const Color(0xFF16A34A),
+                  ),
+                  _buildPerformanceCard(
+                    title: 'Success Rate',
+                    value: '$successRate%',
+                    subtitle: 'Completed vs assigned',
+                    icon: Icons.insights_rounded,
+                    color: const Color(0xFF7C3AED),
+                  ),
+                ];
+
+                if (stackCards) {
+                  return Column(
+                    children: cards
+                        .map(
+                          (card) => Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: card,
+                          ),
+                        )
+                        .toList(),
+                  );
+                }
+
+                return Row(
+                  children: cards
+                      .map(
+                        (card) => Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 12),
+                            child: card,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                );
+              },
+            ),
+            const SizedBox(height: 24),
+            _dashboardSectionTitle('Recent Activity'),
+            const SizedBox(height: 12),
+            _buildRecentActivityCard(liveJobs, completedJobs),
+            const SizedBox(height: 24),
+            _dashboardSectionTitle('Upcoming Surveys'),
+            const SizedBox(height: 12),
+            _buildUpcomingSurveyCard(liveJobs),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _dashboardSectionTitle(String title) {
+    return Text(
+      title,
+      style: const TextStyle(
+        color: Color(0xFF0F172A),
+        fontSize: 18,
+        fontWeight: FontWeight.w900,
+      ),
+    );
+  }
+
+  Widget _buildLargeKpiCard({
+    required String title,
+    required int count,
+    required String subtitle,
+    required IconData icon,
+    required List<Color> gradient,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Ink(
+          width: double.infinity,
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: gradient,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: gradient.last.withOpacity(0.28),
+                blurRadius: 24,
+                offset: const Offset(0, 12),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Icon(icon, color: Colors.white, size: 28),
+              ),
+              const SizedBox(width: 18),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '$count',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 36,
+                        fontWeight: FontWeight.w900,
+                        height: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.82),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.arrow_forward_rounded,
+                color: Colors.white,
+                size: 26,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSmallKpiCard({
+    required IconData icon,
+    required int count,
+    required String title,
+    required String subtitle,
+    required Color color,
+  }) {
+    return Material(
+      color: Colors.white,
+      elevation: 2,
+      shadowColor: Colors.black.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {},
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: color, size: 22),
+              ),
+              Text(
+                '$count',
+                style: const TextStyle(
+                  color: Color(0xFF0F172A),
+                  fontSize: 25,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF0F172A),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF64748B),
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPerformanceCard({
+    required String title,
+    required String value,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: color, size: 22),
+          ),
+          const SizedBox(width: 13),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF475569),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: Color(0xFF0F172A),
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF94A3B8),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecentActivityCard(int liveJobs, int completedJobs) {
+    final rows = <Widget>[
+      if (completedJobs > 0)
+        _activityRow(
+          Icons.check_circle_rounded,
+          'IHM completed survey jobs',
+          'Completed',
+          '$completedJobs jobs',
+          const Color(0xFF16A34A),
+        ),
+      if (liveJobs > 0)
+        _activityRow(
+          Icons.hourglass_top_rounded,
+          'IHM live survey jobs',
+          'Started',
+          '$liveJobs jobs active',
+          const Color(0xFFF59E0B),
+        ),
+    ];
+
+    return _roundedPanel(
+      child: rows.isEmpty
+          ? _emptyPanelText('No recent activity available yet.')
+          : Column(children: rows.take(5).toList()),
+    );
+  }
+
+  Widget _buildUpcomingSurveyCard(int liveJobs) {
+    return _roundedPanel(
+      child: liveJobs <= 0
+          ? _emptyPanelText('No upcoming surveys available.')
+          : Column(
+              children: [
+                _upcomingRow('IHM Live Job Queue', 'Open live jobs'),
+                _upcomingRow('Assigned Survey Work', 'In progress'),
+              ],
+            ),
+    );
+  }
+
+  Widget _roundedPanel({required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+
+  Widget _emptyPanelText(String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Color(0xFF64748B),
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Widget _activityRow(
+    IconData icon,
+    String name,
+    String status,
+    String time,
+    Color color,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 9),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(
+                    color: Color(0xFF0F172A),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  time,
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              status,
+              style: TextStyle(
+                color: color,
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _upcomingRow(String vesselName, String dateText) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: const Color(0xFF2563EB).withOpacity(0.10),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.directions_boat_filled_rounded,
+              color: Color(0xFF2563EB),
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              vesselName,
+              style: const TextStyle(
+                color: Color(0xFF0F172A),
+                fontSize: 13,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          Text(
+            dateText,
+            style: const TextStyle(
+              color: Color(0xFF64748B),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(width: 4),
+          const Icon(Icons.chevron_right_rounded, color: Color(0xFF94A3B8)),
+        ],
+      ),
+    );
+  }
 
   Widget _buildCommandHeader(bool isDark) {
     final userName = _displayName;
@@ -592,7 +2602,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       ],
                     ),
                     child: const Icon(
-                      Icons.admin_panel_settings_rounded,
+                      Icons.account_circle_rounded,
                       color: Colors.white,
                       size: 35,
                     ),
@@ -805,69 +2815,100 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   // ─────────────────────────────────────────────────────────────────────────
 
-  Widget _buildStatCard(String title, int count, IconData icon, Color color) {
+  Widget _buildStatCard(
+    String title,
+    int count,
+    IconData icon,
+    Color color, {
+    VoidCallback? onTap,
+  }) {
     final theme = context.watch<ThemeNotifier>();
     final colors = theme.colors;
 
     return Expanded(
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        margin: const EdgeInsets.only(right: 8),
-        constraints: const BoxConstraints(minHeight: 96),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: colors.bgCard,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: colors.divider),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(theme.isDarkMode ? 0.18 : 0.06),
-              blurRadius: 14,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Icon(icon, color: color, size: 23),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '$count',
-                    style: TextStyle(
-                      color: colors.textPrimary,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w800,
-                      height: 1,
-                    ),
+      child: MouseRegion(
+        cursor: onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            margin: const EdgeInsets.only(right: 8),
+            constraints: const BoxConstraints(minHeight: 96),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: colors.bgCard,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: colors.divider),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(
+                    theme.isDarkMode ? 0.18 : 0.06,
                   ),
-                  const SizedBox(height: 7),
-                  Text(
-                    title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: colors.textSecond,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
-          ],
+            child: Row(
+              children: [
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(icon, color: color, size: 23),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '$count',
+                        style: TextStyle(
+                          color: colors.textPrimary,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w800,
+                          height: 1,
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      Text(
+                        title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: colors.textSecond,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (onTap != null) ...[
+                        const SizedBox(height: 5),
+                        Text(
+                          'Tap to view',
+                          style: TextStyle(
+                            color: color,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (onTap != null)
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: color.withOpacity(0.75),
+                    size: 22,
+                  ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -1245,16 +3286,31 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   label: "Profile",
                 ),
               ]
-            : const [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.dashboard),
-                  label: "Dashboard",
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.person),
-                  label: "Profile",
-                ),
-              ],
+            : isAdminOrManager
+                ? const [
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.dashboard),
+                      label: "Dashboard",
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.manage_accounts),
+                      label: "User Management",
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.person),
+                      label: "Profile",
+                    ),
+                  ]
+                : const [
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.dashboard),
+                      label: "Dashboard",
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.person),
+                      label: "Profile",
+                    ),
+                  ],
       ),
     );
   }
