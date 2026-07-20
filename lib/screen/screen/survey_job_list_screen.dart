@@ -394,49 +394,69 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
     return '$day-$month-${date.year}';
   }
 
-  Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
-    if (!_canEditSurveyDate(job)) {
-      _showMessage('You are not allowed to edit the survey date for this job.');
-      return;
-    }
-
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: job.surveyDate ?? DateTime.now(),
-      firstDate: DateTime(2000),
-      lastDate: DateTime(2100),
+ Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
+  if (!_canEditSurveyDate(job)) {
+    _showMessage(
+      'You are not allowed to edit the survey date for this job.',
     );
-
-    if (picked == null) return;
-
-    try {
-      await SurveyJobOfflineService.updateSurveyDate(
-        job: job,
-        surveyDate: picked,
-      );
-
-      if (mounted) {
-        final updatedJob = SurveyJob.fromJson({
-          ...job.toJson(),
-          'surveyDate': picked.toIso8601String(),
-          'displayStatus': job.totalItems > 0 &&
-                  job.completedItems >= job.totalItems
-              ? 'Completed'
-              : (job.completedItems > 0 ? 'Pending' : 'In Progress'),
-        });
-        setState(() {
-          jobs = jobs
-              .map((item) => item.id == job.id ? updatedJob : item)
-              .toList();
-        });
-      }
-      _showMessage('Survey date saved successfully.');
-      await _loadJobs(showLoading: false);
-    } catch (e) {
-      _showMessage(e.toString());
-    }
+    return;
   }
 
+  final picked = await showDatePicker(
+    context: context,
+    initialDate: job.surveyDate ?? DateTime.now(),
+    firstDate: DateTime(2000),
+    lastDate: DateTime(2100),
+  );
+
+  if (picked == null) return;
+
+  // Create the updated object before the API/offline operation.
+  final updatedJob = SurveyJob.fromJson({
+    ...job.toJson(),
+    'surveyDate': picked.toIso8601String(),
+    'displayStatus':
+        job.totalItems > 0 && job.completedItems >= job.totalItems
+            ? 'Completed'
+            : job.completedItems > 0
+                ? 'Pending'
+                : 'In Progress',
+  });
+
+  // Immediately reflect the selected date in the UI.
+  if (mounted) {
+    setState(() {
+      jobs = jobs
+          .map((item) => item.id == job.id ? updatedJob : item)
+          .toList();
+    });
+  }
+
+  try {
+    await SurveyJobOfflineService.updateSurveyDate(
+      job: updatedJob,
+      surveyDate: picked,
+    );
+
+    if (!mounted) return;
+
+    _showMessage('Survey date saved successfully.');
+
+    // Do not call _loadJobs() here.
+    // It can reload an older cached/API value and overwrite the UI.
+  } catch (e) {
+    // Restore the previous job when saving fails.
+    if (mounted) {
+      setState(() {
+        jobs = jobs
+            .map((item) => item.id == job.id ? job : item)
+            .toList();
+      });
+    }
+
+    _showMessage(e.toString());
+  }
+}
   bool _canEditSurveyDate(SurveyJob job) {
     if (job.canEdit) return true;
     if (userId <= 0) return false;
