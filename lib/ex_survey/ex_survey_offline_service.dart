@@ -364,7 +364,7 @@ class ExSurveyOfflineService {
   }
 
   static Future<void> submitForQc(int jobId) async {
-    if (!await isOnline) {
+    if (!(await isOnline)) {
       await _enqueue(
         entityType: 'job',
         entityLocalId: jobId,
@@ -378,7 +378,7 @@ class ExSurveyOfflineService {
   }
 
   static Future<void> review(int jobId, String status) async {
-    if (!await isOnline) {
+    if (!(await isOnline)) {
       await _enqueue(
         entityType: 'job',
         entityLocalId: jobId,
@@ -392,7 +392,7 @@ class ExSurveyOfflineService {
   }
 
   static Future<Uint8List> generateReport(int jobId) async {
-    if (!await isOnline) {
+    if (!(await isOnline)) {
       throw Exception(
         'Report generation needs internet. Sync pending data first.',
       );
@@ -403,7 +403,7 @@ class ExSurveyOfflineService {
 
   static Future<void> syncPendingExData() async {
     if (kIsWeb) return;
-    if (_syncing || !await isOnline) return;
+    if (_syncing || !(await isOnline)) return;
     _syncing = true;
     final db = await DatabaseHelper.instance.database;
 
@@ -411,7 +411,8 @@ class ExSurveyOfflineService {
       final queue = await db.query(
         'ex_sync_queue',
         where: 'status IN (0, 2)',
-        orderBy: 'id ASC',
+        orderBy:
+            "CASE WHEN entityType IN ('photo', 'document') THEN 1 ELSE 0 END, id ASC",
       );
       for (final item in queue) {
         final queueId = _int(item['id']);

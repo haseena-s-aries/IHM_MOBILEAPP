@@ -37,3 +37,17 @@ Future<String> writeIhmLocalPhoto(Uint8List bytes, String fileName) async {
 Future<Uint8List> readIhmLocalPhoto(String path) async {
   return File(path).readAsBytes();
 }
+
+Future<void> clearIhmLocalFiles() async {
+  final directory = await getApplicationDocumentsDirectory();
+  for (final folderName in [
+    'ihm_sampling_photos',
+    'ihm_layout_images',
+    'ihm_vscp_checklists',
+  ]) {
+    final target = Directory(p.join(directory.path, folderName));
+    if (await target.exists()) {
+      await target.delete(recursive: true);
+    }
+  }
+}

@@ -86,6 +86,19 @@ class AppDialog {
     );
   }
 
+  static Future<void> warning(
+    BuildContext context, {
+    required String title,
+    required String message,
+  }) {
+    return _message(
+      context,
+      type: AppDialogType.warning,
+      title: title,
+      message: message,
+    );
+  }
+
   static Future<T?> execute<T>(
     BuildContext context, {
     required String loadingMessage,

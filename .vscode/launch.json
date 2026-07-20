@@ -1,28 +1,48 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-    "version": "0.2.0",
-    "configurations": [
-        
-        {
-           "name": "Pixel 5 - Android 16.0 (Baklava)",
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "AURAS Web - Chrome Profile",
       "request": "launch",
       "type": "dart",
       "program": "lib/main.dart",
-      "deviceId": "emulator-5554" // 👈 Your emulator ID
-        },
-        {
-            "name": "auras (profile mode)",
-            "request": "launch",
-            "type": "dart",
-            "flutterMode": "profile"
-        },
-        {
-            "name": "auras (release mode)",
-            "request": "launch",
-            "type": "dart",
-            "flutterMode": "release"
-        }
-    ]
+      "deviceId": "chrome",
+      "flutterMode": "profile",
+      "toolArgs": [
+        "--web-browser-flag=--disable-extensions",
+        "--web-browser-flag=--disable-background-networking"
+      ]
+    },
+    {
+      "name": "AURAS Web - Server No Debug",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "web-server",
+      "flutterMode": "debug",
+      "toolArgs": [
+        "--web-hostname=127.0.0.1",
+        "--web-port=5858"
+      ]
+    },
+    {
+      "name": "Pixel 5 - Android",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "emulator-5554"
+    },
+    {
+      "name": "AURAS Profile",
+      "request": "launch",
+      "type": "dart",
+      "flutterMode": "profile"
+    },
+    {
+      "name": "AURAS Release",
+      "request": "launch",
+      "type": "dart",
+      "flutterMode": "release"
+    }
+  ]
 }

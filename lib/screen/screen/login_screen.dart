@@ -3,6 +3,7 @@ import 'package:Auras/screen/screen/assigned_reports_screen.dart';
 import 'package:Auras/screen/screen/forgotpassword_screen.dart';
 import 'package:Auras/screen/screen/register_screen.dart';
 import 'package:Auras/service/api_service.dart';
+import 'package:Auras/service/sync_service.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -66,23 +67,42 @@ class _LoginScreenState extends State<LoginScreen> {
       final userId =
           int.tryParse((user['userId'] ?? user['id'] ?? 0).toString()) ?? 0;
 
-      final userWithId = {...user, 'userId': userId};
-      final role = userWithId['role']?.toString().toLowerCase();
+      final role = (user['role'] ??
+              user['Role'] ??
+              user['roleName'] ??
+              user['RoleName'] ??
+              '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      final userWithId = {...user, 'userId': userId, 'role': role};
       final fullName =
           userWithId['fullName']?.toString() ??
           userWithId['name']?.toString() ??
           userWithId['username']?.toString() ??
           '';
+      final email = userWithId['email']?.toString() ?? '';
+      final projectName =
+          (userWithId['projectName'] ?? userWithId['ProjectName'] ?? '')
+              .toString();
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('isLoggedIn', true);
-      await prefs.setString('userRole', role ?? '');
+      await prefs.setString('userRole', role);
       await prefs.setInt('userId', userId);
       await prefs.setString('fullName', fullName);
+      await prefs.setString('email', email);
+      await prefs.setString('projectName', projectName);
       await prefs.setString('token', token);
+      SyncService.startAutoSync();
 
       if (!mounted) return;
-      if (role == 'admin' || role == 'manager' || role == 'surveyor') {
+      final isGlobalAdminRole = role == 'admin' ||
+          role == 'global admin' ||
+          role == 'globaladmin' ||
+          role == 'administrator';
+
+      if (isGlobalAdminRole || role == 'manager' || role == 'surveyor') {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(

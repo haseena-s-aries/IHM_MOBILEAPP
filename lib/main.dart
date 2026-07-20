@@ -60,10 +60,18 @@ void main() async {
   final userRole = prefs.getString('userRole');
   final userId = prefs.getInt('userId');
   final fullName = prefs.getString('fullName');
+  final email = prefs.getString('email');
+  final projectName = prefs.getString('projectName');
   final isDarkMode = await ThemeNotifier.loadSavedTheme();
 
   // Simulate user object
-  final user = {'userId': userId, 'role': userRole, 'fullName': fullName};
+  final user = {
+    'userId': userId,
+    'role': userRole,
+    'fullName': fullName,
+    'email': email,
+    'projectName': projectName,
+  };
 
   // Add this in a suitable place like in your main() or initState of a central widget
 
@@ -71,7 +79,11 @@ void main() async {
 
   if (isLoggedIn && userRole != null && userId != null) {
     final normalizedRole = userRole.toLowerCase();
-    if (normalizedRole == 'admin' ||
+    final isGlobalAdminRole = normalizedRole == 'admin' ||
+        normalizedRole == 'global admin' ||
+        normalizedRole == 'globaladmin' ||
+        normalizedRole == 'administrator';
+    if (isGlobalAdminRole ||
         normalizedRole == 'manager' ||
         normalizedRole == 'surveyor') {
       initialScreen = AdminDashboardScreen(user: user);

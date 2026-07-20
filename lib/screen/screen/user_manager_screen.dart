@@ -22,6 +22,7 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
   List<Map<String, dynamic>> _users = [];
   List<ProjectOption> _projects = [];
   bool _isLoading = true;
+  bool _isRefreshing = false;
   String? _error;
   String _query = '';
   String _roleFilter = 'All';
@@ -49,11 +50,20 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
     super.dispose();
   }
 
-  Future<void> _loadData() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+  Future<void> _loadData({bool showLoading = true}) async {
+    if (_isRefreshing) return;
+    _isRefreshing = true;
+    final previousOffset =
+        _scrollController.hasClients ? _scrollController.offset : null;
+
+    if (showLoading && mounted) {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    } else if (mounted) {
+      setState(() => _error = null);
+    }
 
     try {
       final results = await Future.wait([
@@ -102,12 +112,23 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
         _visibleCount = _pageSize;
         _isLoading = false;
       });
+      if (previousOffset != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!_scrollController.hasClients) return;
+          final max = _scrollController.position.maxScrollExtent;
+          _scrollController.jumpTo(previousOffset.clamp(0.0, max).toDouble());
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        if (showLoading || _users.isEmpty) {
+          _error = e.toString();
+        }
         _isLoading = false;
       });
+    } finally {
+      _isRefreshing = false;
     }
   }
 
@@ -199,7 +220,7 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
       successMessage: '${_displayName(user)} can now access the app.',
       errorTitle: 'Unable to approve user',
     );
-    if (approved == true && mounted) await _loadData();
+    if (approved == true && mounted) await _loadData(showLoading: false);
   }
 
   Future<void> _rejectUser(Map<String, dynamic> user) async {
@@ -223,7 +244,7 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
       successMessage: '${_displayName(user)} was rejected.',
       errorTitle: 'Unable to reject user',
     );
-    if (rejected == true && mounted) await _loadData();
+    if (rejected == true && mounted) await _loadData(showLoading: false);
   }
 
   Future<void> _deleteUser(Map<String, dynamic> user) async {
@@ -248,7 +269,7 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
       successMessage: '${_displayName(user)} was removed successfully.',
       errorTitle: 'Unable to update user access',
     );
-    if (deleted == true && mounted) await _loadData();
+    if (deleted == true && mounted) await _loadData(showLoading: false);
   }
 
   Future<int?> _selectProjectForApproval({
@@ -339,34 +360,44 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
     int? selectedProjectId = isNew
         ? null
         : (projectAccessDraft.isNotEmpty
-              ? _readInt(projectAccessDraft.first, ['projectId', 'ProjectId'])
-                    .takeIfPositive()
+              ? _readInt(projectAccessDraft.first, [
+                  'projectId',
+                  'ProjectId',
+                ]).takeIfPositive()
               : _readInt(user!, ['projectId', 'ProjectId']).takeIfPositive());
     if (selectedProjectId != null &&
         !availableProjects.any((project) => project.id == selectedProjectId)) {
       selectedProjectId = null;
     }
     String selectedRole = isNew ? 'User' : _role(user!);
-    int? selectedRoleId =
-        isNew ? null : _readInt(user!, ['roleId', 'RoleId']).takeIfPositive();
+    int? selectedRoleId = isNew
+        ? null
+        : _readInt(user!, ['roleId', 'RoleId']).takeIfPositive();
     List<RoleOption> roles = [];
     bool loadingRoles = false;
     bool obscurePassword = true;
 
-    void addOrUpdateProjectAccess(StateSetter setSheetState) {
-      if ((selectedRole).toLowerCase() == 'admin') return;
+    bool addOrUpdateProjectAccess(
+      StateSetter setSheetState, {
+      bool showMessage = true,
+    }) {
+      if ((selectedRole).toLowerCase() == 'admin') return true;
       final projectId = selectedProjectId;
       if (projectId == null || projectId <= 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please select a project.')),
-        );
-        return;
+        if (showMessage) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Please select a project.')),
+          );
+        }
+        return false;
       }
       if (selectedRole.trim().isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please select a role.')),
-        );
-        return;
+        if (showMessage) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Please select a role.')),
+          );
+        }
+        return false;
       }
 
       ProjectOption? project;
@@ -379,7 +410,9 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
       final existingIndex = projectAccessDraft.indexWhere(
         (x) => _readInt(x, ['projectId', 'ProjectId']) == projectId,
       );
-      final existing = existingIndex >= 0 ? projectAccessDraft[existingIndex] : null;
+      final existing = existingIndex >= 0
+          ? projectAccessDraft[existingIndex]
+          : null;
       final next = <String, dynamic>{
         'id': existing == null ? 0 : _readInt(existing, ['id', 'Id']),
         'userId': isNew ? 0 : _id(user!),
@@ -400,14 +433,7 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
           projectAccessDraft.add(next);
         }
       });
-    }
-
-    void removeProjectAccess(StateSetter setSheetState, int projectId) {
-      setSheetState(() {
-        projectAccessDraft.removeWhere(
-          (x) => _readInt(x, ['projectId', 'ProjectId']) == projectId,
-        );
-      });
+      return true;
     }
 
     Future<void> loadRoles(StateSetter setSheetState) async {
@@ -437,6 +463,40 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
       }
     }
 
+    void removeProjectAccess(StateSetter setSheetState, int projectId) {
+      var shouldReloadRoles = false;
+      setSheetState(() {
+        projectAccessDraft.removeWhere(
+          (x) => _readInt(x, ['projectId', 'ProjectId']) == projectId,
+        );
+
+        if (selectedProjectId == projectId) {
+          if (projectAccessDraft.isEmpty) {
+            selectedProjectId = null;
+            selectedRole = 'User';
+            selectedRoleId = null;
+            roles = const [];
+          } else {
+            final remaining = projectAccessDraft.first;
+            selectedProjectId = _readInt(remaining, [
+              'projectId',
+              'ProjectId',
+            ]).takeIfPositive();
+            selectedRole = _readString(remaining, ['roleName', 'RoleName']);
+            selectedRoleId = _readInt(remaining, [
+              'roleId',
+              'RoleId',
+            ]).takeIfPositive();
+            roles = const [];
+            shouldReloadRoles = selectedProjectId != null;
+          }
+        }
+      });
+      if (shouldReloadRoles) {
+        loadRoles(setSheetState);
+      }
+    }
+
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -446,14 +506,17 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
             if (roles.isEmpty && !loadingRoles && selectedProjectId != null) {
               Future.microtask(() => loadRoles(setSheetState));
             }
-            final roleItems = <String>{
-              if (_isAdmin) 'Admin',
-              ...roles.map((role) => role.roleName),
-              'Manager',
-              'Surveyor',
-              'User',
-              'Client',
-            }.where((role) => _isAdmin || role.toLowerCase() != 'admin').toList();
+            final roleItems =
+                <String>{
+                      if (_isAdmin) 'Admin',
+                      ...roles.map((role) => role.roleName),
+                      'Manager',
+                      'Surveyor',
+                      'User',
+                      'Client',
+                    }
+                    .where((role) => _isAdmin || role.toLowerCase() != 'admin')
+                    .toList();
 
             if (!roleItems.contains(selectedRole)) {
               selectedRole = roleItems.isEmpty ? 'User' : roleItems.first;
@@ -532,8 +595,9 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
                             final matched = roles
                                 .where((role) => role.roleName == value)
                                 .toList();
-                            selectedRoleId =
-                                matched.isEmpty ? null : matched.first.id;
+                            selectedRoleId = matched.isEmpty
+                                ? null
+                                : matched.first.id;
                             if (value.toLowerCase() == 'admin') {
                               selectedProjectId = null;
                             }
@@ -594,7 +658,8 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
                                 children: [
                                   const Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           'Project access',
@@ -613,12 +678,6 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
                                       ],
                                     ),
                                   ),
-                                  OutlinedButton.icon(
-                                    onPressed: () =>
-                                        addOrUpdateProjectAccess(setSheetState),
-                                    icon: const Icon(Icons.add_circle_outline),
-                                    label: const Text('Add'),
-                                  ),
                                 ],
                               ),
                               const SizedBox(height: 10),
@@ -629,18 +688,18 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
                                 )
                               else
                                 ...projectAccessDraft.map((access) {
-                                  final projectId = _readInt(
-                                    access,
-                                    ['projectId', 'ProjectId'],
-                                  );
-                                  final projectName = _readString(
-                                    access,
-                                    ['projectName', 'ProjectName'],
-                                  );
-                                  final roleName = _readString(
-                                    access,
-                                    ['roleName', 'RoleName'],
-                                  );
+                                  final projectId = _readInt(access, [
+                                    'projectId',
+                                    'ProjectId',
+                                  ]);
+                                  final projectName = _readString(access, [
+                                    'projectName',
+                                    'ProjectName',
+                                  ]);
+                                  final roleName = _readString(access, [
+                                    'roleName',
+                                    'RoleName',
+                                  ]);
                                   return Container(
                                     margin: const EdgeInsets.only(top: 8),
                                     padding: const EdgeInsets.symmetric(
@@ -720,10 +779,9 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
                               ),
                             ),
                           ),
-                          validator: (value) =>
-                              (value ?? '').length < 6
-                                  ? 'Password must be at least 6 characters'
-                                  : null,
+                          validator: (value) => (value ?? '').length < 6
+                              ? 'Password must be at least 6 characters'
+                              : null,
                         ),
                       ],
                       const SizedBox(height: 18),
@@ -732,14 +790,18 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
                         child: FilledButton.icon(
                           onPressed: () async {
                             if (!formKey.currentState!.validate()) return;
-                            if (!isAdminRole && projectAccessDraft.isEmpty) {
-                              addOrUpdateProjectAccess(setSheetState);
+                            if (!isAdminRole && selectedProjectId != null) {
+                              addOrUpdateProjectAccess(
+                                setSheetState,
+                                showMessage: false,
+                              );
                             }
                             if (!isAdminRole && projectAccessDraft.isEmpty) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content:
-                                      Text('Please add at least one project access.'),
+                                  content: Text(
+                                    'Please select at least one project access.',
+                                  ),
                                 ),
                               );
                               return;
@@ -751,8 +813,9 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
                                 firstAccess ?? <String, dynamic>{};
                             final saved = await AppDialog.execute<bool>(
                               context,
-                              loadingMessage:
-                                  isNew ? 'Creating user...' : 'Saving user...',
+                              loadingMessage: isNew
+                                  ? 'Creating user...'
+                                  : 'Saving user...',
                               action: () async {
                                 await ApiService.saveUser({
                                   'id': isNew ? 0 : _id(user!),
@@ -760,52 +823,53 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
                                   'email': emailController.text.trim(),
                                   'role': isAdminRole
                                       ? selectedRole
-                                      : _readString(
-                                          primaryAccess,
-                                          ['roleName', 'RoleName'],
-                                        ),
+                                      : _readString(primaryAccess, [
+                                          'roleName',
+                                          'RoleName',
+                                        ]),
                                   'roleName': isAdminRole
                                       ? selectedRole
-                                      : _readString(
-                                          primaryAccess,
-                                          ['roleName', 'RoleName'],
-                                        ),
+                                      : _readString(primaryAccess, [
+                                          'roleName',
+                                          'RoleName',
+                                        ]),
                                   'roleId': isAdminRole
                                       ? selectedRoleId
-                                      : _readInt(
-                                          primaryAccess,
-                                          ['roleId', 'RoleId'],
-                                        )
-                                          .takeIfPositive(),
+                                      : _readInt(primaryAccess, [
+                                          'roleId',
+                                          'RoleId',
+                                        ]).takeIfPositive(),
                                   'projectId': isAdminRole
                                       ? null
-                                      : _readInt(
-                                          primaryAccess,
-                                          ['projectId', 'ProjectId'],
-                                        ),
+                                      : _readInt(primaryAccess, [
+                                          'projectId',
+                                          'ProjectId',
+                                        ]),
                                   'projectName': isAdminRole
                                       ? 'All Projects'
-                                      : _readString(
-                                          primaryAccess,
-                                          ['projectName', 'ProjectName'],
-                                        ),
+                                      : _readString(primaryAccess, [
+                                          'projectName',
+                                          'ProjectName',
+                                        ]),
                                   'replaceProjectAccesses': true,
-                                  'projectAccesses':
-                                      isAdminRole ? [] : projectAccessDraft,
+                                  'projectAccesses': isAdminRole
+                                      ? []
+                                      : projectAccessDraft,
                                   if (isNew)
                                     'password': passwordController.text.trim(),
                                 });
                                 return true;
                               },
-                              successTitle:
-                                  isNew ? 'User created' : 'User updated',
+                              successTitle: isNew
+                                  ? 'User created'
+                                  : 'User updated',
                               successMessage:
                                   '${nameController.text.trim()} saved successfully.',
                               errorTitle: 'Unable to save user',
                             );
                             if (saved == true && mounted) {
                               Navigator.pop(context);
-                              await _loadData();
+                              await _loadData(showLoading: false);
                             }
                           },
                           icon: const Icon(Icons.save_outlined),
@@ -925,7 +989,7 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
         title: 'Unable to load users',
         message: _error!,
         actionLabel: 'Retry',
-        onAction: _loadData,
+        onAction: () => _loadData(showLoading: false),
       );
     }
 
@@ -933,7 +997,7 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
     final visible = filtered.take(_visibleCount).toList();
 
     return RefreshIndicator(
-      onRefresh: _loadData,
+      onRefresh: () => _loadData(showLoading: false),
       child: CustomScrollView(
         controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
@@ -959,7 +1023,8 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
               sliver: SliverList.separated(
-                itemCount: visible.length + (_visibleCount < filtered.length ? 1 : 0),
+                itemCount:
+                    visible.length + (_visibleCount < filtered.length ? 1 : 0),
                 separatorBuilder: (_, __) => const SizedBox(height: 12),
                 itemBuilder: (context, index) {
                   if (index >= visible.length) {
@@ -1071,7 +1136,13 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
               _filterChip(
                 label: 'Status',
                 value: _statusFilter,
-                values: const ['All', 'Approved', 'Pending', 'Rejected', 'Inactive'],
+                values: const [
+                  'All',
+                  'Approved',
+                  'Pending',
+                  'Rejected',
+                  'Inactive',
+                ],
                 onChanged: (value) => setState(() {
                   _statusFilter = value;
                   _visibleCount = _pageSize;
@@ -1180,12 +1251,24 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
                     }
                   },
                   itemBuilder: (context) => [
-                    const PopupMenuItem(value: 'view', child: Text('View details')),
-                    const PopupMenuItem(value: 'edit', child: Text('Edit role/project')),
+                    const PopupMenuItem(
+                      value: 'view',
+                      child: Text('View details'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'edit',
+                      child: Text('Edit role/project'),
+                    ),
                     if (isPending)
-                      const PopupMenuItem(value: 'approve', child: Text('Approve')),
+                      const PopupMenuItem(
+                        value: 'approve',
+                        child: Text('Approve'),
+                      ),
                     if (isPending)
-                      const PopupMenuItem(value: 'reject', child: Text('Reject')),
+                      const PopupMenuItem(
+                        value: 'reject',
+                        child: Text('Reject'),
+                      ),
                     const PopupMenuDivider(),
                     const PopupMenuItem(
                       value: 'delete',
@@ -1337,7 +1420,9 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
   String _role(Map<String, dynamic> user) {
     final requested = _requestedRole(user);
     final role = _readString(user, ['roleName', 'RoleName', 'role', 'Role']);
-    return requested.isNotEmpty && _status(user) == 'Pending' ? requested : role;
+    return requested.isNotEmpty && _status(user) == 'Pending'
+        ? requested
+        : role;
   }
 
   String _requestedRole(Map<String, dynamic> user) =>
@@ -1345,11 +1430,19 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
 
   String _projectName(Map<String, dynamic> user) {
     final accessNames = _projectAccesses(user)
-        .where((access) =>
-            _readBool(access, ['isActive', 'IsActive']) &&
-            !_readBool(access, ['isRejected', 'IsRejected']))
-        .map((access) =>
-            _readString(access, ['projectName', 'ProjectName', 'projectCode', 'ProjectCode']))
+        .where(
+          (access) =>
+              _readBool(access, ['isActive', 'IsActive']) &&
+              !_readBool(access, ['isRejected', 'IsRejected']),
+        )
+        .map(
+          (access) => _readString(access, [
+            'projectName',
+            'ProjectName',
+            'projectCode',
+            'ProjectCode',
+          ]),
+        )
         .where((name) => name.trim().isNotEmpty)
         .toSet()
         .toList();
@@ -1394,14 +1487,12 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
             'id': _readInt(access, ['id', 'Id']),
             'userId': _readInt(access, ['userId', 'UserId']),
             'projectId': projectId,
-            'projectName': _readString(
-                  access,
-                  ['projectName', 'ProjectName'],
-                ).isNotEmpty
+            'projectName':
+                _readString(access, ['projectName', 'ProjectName']).isNotEmpty
                 ? _readString(access, ['projectName', 'ProjectName'])
                 : project?.name,
-            'projectCode': _readString(access, ['projectCode', 'ProjectCode'])
-                    .isNotEmpty
+            'projectCode':
+                _readString(access, ['projectCode', 'ProjectCode']).isNotEmpty
                 ? _readString(access, ['projectCode', 'ProjectCode'])
                 : project?.code,
             'roleId': _readInt(access, ['roleId', 'RoleId']).takeIfPositive(),
@@ -1415,10 +1506,14 @@ class _UserManagerScreenState extends State<UserManagerScreen> {
   }
 
   String _employeeCode(Map<String, dynamic> user) {
-    final employee = _readString(
-      user,
-      ['employeeId', 'EmployeeId', 'employeeCode', 'EmployeeCode', 'fieldName', 'FieldName'],
-    );
+    final employee = _readString(user, [
+      'employeeId',
+      'EmployeeId',
+      'employeeCode',
+      'EmployeeCode',
+      'fieldName',
+      'FieldName',
+    ]);
     return employee.trim().isEmpty ? '-' : employee;
   }
 

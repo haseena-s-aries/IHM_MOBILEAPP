@@ -29,7 +29,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -159,6 +159,7 @@ class DatabaseHelper {
     await _createIhmOfflineTables(db);
     await _createExSurveyOfflineTables(db);
     await _createSurveyJobCacheTables(db);
+    await _createSyncMetadataTables(db);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -195,6 +196,10 @@ class DatabaseHelper {
         definition: 'TEXT',
       );
     }
+
+    if (oldVersion < 8) {
+      await _createSyncMetadataTables(db);
+    }
   }
 
   Future<void> _addColumnIfMissing(
@@ -230,6 +235,49 @@ class DatabaseHelper {
     await db.execute('''
       CREATE INDEX IF NOT EXISTS IX_survey_jobs_cache_scope
         ON survey_jobs_cache(surveyType, userId, isAdmin)
+    ''');
+  }
+
+  Future<void> _createSyncMetadataTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updatedAt TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ihm_cached_files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        surveyJobId INTEGER NOT NULL,
+        fileType TEXT NOT NULL,
+        serverPath TEXT,
+        localPath TEXT,
+        fileName TEXT,
+        updatedAt TEXT,
+        UNIQUE(surveyJobId, fileType, serverPath)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS IX_ihm_cached_files_job_type
+        ON ihm_cached_files(surveyJobId, fileType)
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS survey_job_sync_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        surveyJobId INTEGER NOT NULL,
+        entityType TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        payloadJson TEXT NOT NULL,
+        status INTEGER DEFAULT 0,
+        retryCount INTEGER DEFAULT 0,
+        lastError TEXT,
+        createdAt TEXT,
+        updatedAt TEXT
+      )
     ''');
   }
 

@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:Auras/ThemeNotifier.dart';
 import 'package:Auras/ex_survey/ex_survey_screen.dart';
 import 'package:Auras/model/survey_job.dart';
@@ -9,9 +12,10 @@ import 'package:Auras/service/survey_job_offline_service.dart';
 import 'package:Auras/utils/app_dialog.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:open_file/open_file.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 
 // ─── Color Palette (matches VesselMasterScreen) ───────────────────────────────
 class _AppColors {
@@ -56,6 +60,7 @@ class SurveyJobListScreen extends StatefulWidget {
 
 class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
   bool isLoading = true;
+  bool _isRefreshingJobs = false;
   bool isAdmin = false;
   int userId = 0;
   String? errorMessage;
@@ -91,7 +96,13 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
     final statusFiltered = normalizedStatuses.isEmpty
         ? jobs
         : jobs
-            .where((job) => normalizedStatuses.contains(job.status.toLowerCase()))
+            .where(
+              (job) =>
+                  normalizedStatuses.contains(
+                    job.displayStatus.toLowerCase(),
+                  ) ||
+                  normalizedStatuses.contains(job.status.toLowerCase()),
+            )
             .toList();
 
     if (_searchQuery.isEmpty) return statusFiltered;
@@ -101,6 +112,7 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
           (j.clientName ?? '').toLowerCase().contains(q) ||
           (j.vesselName ?? '').toLowerCase().contains(q) ||
           (j.siteName ?? '').toLowerCase().contains(q) ||
+          j.displayStatus.toLowerCase().contains(q) ||
           j.status.toLowerCase().contains(q);
     }).toList();
   }
@@ -117,6 +129,9 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
           builder: (_) => IHMSurveyScreen(userId: userId, job: job),
         ),
       );
+      if (mounted) {
+        await _loadJobs(showLoading: false);
+      }
       return;
     }
 
@@ -124,6 +139,9 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
       context,
       MaterialPageRoute(builder: (_) => ExSurveyScreen(job: job)),
     );
+    if (mounted) {
+      await _loadJobs(showLoading: false);
+    }
   }
 
   Future<void> _uploadIhmExcel(SurveyJob job) async {
@@ -131,6 +149,8 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
       _showMessage('Job ID missing. Please create/save the job first.');
       return;
     }
+    final hadChecklist =
+        (job.vscpChecklistFilePath ?? '').trim().isNotEmpty;
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['xlsx', 'xls'],
@@ -144,9 +164,42 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
         fileName: result.files.single.name,
       );
       await IhmOfflineService.getAreasForJob(job.id);
-      _showMessage('Excel checklist uploaded successfully.');
-      await _loadJobs();
+      _showMessage(
+        hadChecklist
+            ? 'VSCP Checklist Template replaced successfully.'
+            : 'VSCP Checklist Template uploaded successfully.',
+      );
+      await _loadJobs(showLoading: false);
     } catch (e) {
+      _showMessage(e.toString());
+    }
+  }
+
+  Future<void> _viewVscpChecklist(SurveyJob job) async {
+    if (job.id <= 0) {
+      _showMessage('Job ID missing. Please create/save the job first.');
+      return;
+    }
+
+    try {
+      final bytes = await ApiService.downloadVscpChecklist(job.id);
+      final dir = await getTemporaryDirectory();
+      final fallbackName = 'vscp-checklist-${job.id}.xlsx';
+      final fileName = ((job.vscpChecklistFileName ?? '').trim().isEmpty
+              ? fallbackName
+              : job.vscpChecklistFileName!.trim())
+          .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      final file = File('${dir.path}/$fileName');
+
+      await file.writeAsBytes(bytes, flush: true);
+      await OpenFile.open(file.path);
+    } catch (e) {
+      final cachedPath =
+          await IhmOfflineService.getCachedVscpChecklistLocalPath(job.id);
+      if (cachedPath != null && cachedPath.isNotEmpty) {
+        await OpenFile.open(cachedPath);
+        return;
+      }
       _showMessage(e.toString());
     }
   }
@@ -174,7 +227,7 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
           json['message']?.toString() ?? 'Layout uploaded successfully.';
 
       _showMessage(message);
-      await _loadJobs();
+      await _loadJobs(showLoading: false);
     } catch (e) {
       _showMessage(e.toString().isEmpty ? 'Upload failed.' : e.toString());
     }
@@ -198,7 +251,7 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
         fileName: result.files.single.name,
       );
       _showMessage('Image uploaded successfully.');
-      await _loadJobs();
+      await _loadJobs(showLoading: false);
     } catch (e) {
       _showMessage(e.toString());
     }
@@ -331,7 +384,7 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
       errorTitle: 'Unable to delete job',
     );
     if (deleted == true && mounted) {
-      await _loadJobs();
+      await _loadJobs(showLoading: false);
     }
   }
 
@@ -342,6 +395,11 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
   }
 
   Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
+    if (!_canEditSurveyDate(job)) {
+      _showMessage('You are not allowed to edit the survey date for this job.');
+      return;
+    }
+
     final picked = await showDatePicker(
       context: context,
       initialDate: job.surveyDate ?? DateTime.now(),
@@ -352,30 +410,65 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
     if (picked == null) return;
 
     try {
-      await ApiService.updateSurveyDate(
-        surveyJobId: job.id,
+      await SurveyJobOfflineService.updateSurveyDate(
+        job: job,
         surveyDate: picked,
       );
 
+      if (mounted) {
+        final updatedJob = SurveyJob.fromJson({
+          ...job.toJson(),
+          'surveyDate': picked.toIso8601String(),
+          'displayStatus': job.totalItems > 0 &&
+                  job.completedItems >= job.totalItems
+              ? 'Completed'
+              : (job.completedItems > 0 ? 'Pending' : 'In Progress'),
+        });
+        setState(() {
+          jobs = jobs
+              .map((item) => item.id == job.id ? updatedJob : item)
+              .toList();
+        });
+      }
       _showMessage('Survey date saved successfully.');
-      await _loadJobs();
+      await _loadJobs(showLoading: false);
     } catch (e) {
       _showMessage(e.toString());
     }
   }
 
-  Future<void> _loadJobs() async {
-    setState(() {
-      isLoading = true;
-      errorMessage = null;
-    });
+  bool _canEditSurveyDate(SurveyJob job) {
+    if (job.canEdit) return true;
+    if (userId <= 0) return false;
+    if (job.assignedUserId == userId) return true;
+    if (job.primarySurveyorUserId == userId) return true;
+    if (job.secondarySurveyorUserId == userId) return true;
+    return false;
+  }
+
+  Future<void> _loadJobs({bool showLoading = true}) async {
+    if (_isRefreshingJobs) return;
+    _isRefreshingJobs = true;
+
+    if (showLoading && mounted) {
+      setState(() {
+        isLoading = true;
+        errorMessage = null;
+      });
+    } else if (mounted) {
+      setState(() => errorMessage = null);
+    }
 
     try {
       final prefs = await SharedPreferences.getInstance();
       userId = prefs.getInt('userId') ?? 0;
       final role = prefs.getString('userRole') ?? '';
-      isAdmin =
-          role.toLowerCase() == 'admin' || role.toLowerCase() == 'manager';
+      final normalizedRole = role.toLowerCase();
+      isAdmin = normalizedRole == 'admin' ||
+          normalizedRole == 'global admin' ||
+          normalizedRole == 'globaladmin' ||
+          normalizedRole == 'administrator' ||
+          normalizedRole == 'manager';
 
       final hasIhmCompletionFilter =
           widget.ihmCompletionFilter != null &&
@@ -477,27 +570,21 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
         }
         isLoading = false;
       });
+    } finally {
+      _isRefreshingJobs = false;
     }
   }
 
   Color _statusColor(String status) {
     switch (status) {
-      case 'Draft':
-        return _AppColors.textMuted;
-      case 'Assigned':
-        return _AppColors.ocean;
-      case 'InProgress':
-        return _AppColors.amber;
-      case 'Submitted':
-        return _AppColors.deepPurple;
-      case 'Approved':
+      case 'Completed':
         return _AppColors.success;
-      case 'ReportGenerated':
-        return _AppColors.teal;
-      case 'Closed':
-        return _AppColors.textSecondary;
-      case 'QcReturned':
-        return _AppColors.red;
+      case 'Pending':
+        return _AppColors.amber;
+      case 'In Progress':
+        return _AppColors.ocean;
+      case 'Not Started':
+        return _AppColors.textMuted;
       default:
         return _AppColors.textMuted;
     }
@@ -505,22 +592,14 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
 
   IconData _statusIcon(String status) {
     switch (status) {
-      case 'Draft':
-        return Icons.edit_note;
-      case 'Assigned':
-        return Icons.person_pin_circle;
-      case 'InProgress':
+      case 'Completed':
+        return Icons.check_circle_outline;
+      case 'Pending':
+        return Icons.schedule_rounded;
+      case 'In Progress':
         return Icons.pending_actions;
-      case 'Submitted':
-        return Icons.upload_file;
-      case 'Approved':
-        return Icons.verified;
-      case 'ReportGenerated':
-        return Icons.summarize;
-      case 'Closed':
-        return Icons.lock_outline;
-      case 'QcReturned':
-        return Icons.replay_circle_filled;
+      case 'Not Started':
+        return Icons.radio_button_unchecked;
       default:
         return Icons.help_outline;
     }
@@ -667,11 +746,14 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
-              insetPadding: const EdgeInsets.all(24),
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 24,
+              ),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(
+                constraints: BoxConstraints(
                   maxWidth: 720,
-                  maxHeight: 700,
+                  maxHeight: MediaQuery.of(context).size.height * 0.9,
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -746,7 +828,14 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
 
                     Flexible(
                       child: SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        padding: EdgeInsets.fromLTRB(
+                          24,
+                          20,
+                          24,
+                          24 + MediaQuery.of(context).viewInsets.bottom,
+                        ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -1326,7 +1415,7 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
     );
 
     if (created == true) {
-      await _loadJobs();
+      await _loadJobs(showLoading: false);
     }
   }
 
@@ -1342,6 +1431,246 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
       if (manager.id == managerUserId) return manager;
     }
     return null;
+  }
+
+  String _dateInput(DateTime? value) {
+    if (value == null) return '';
+    return '${value.year.toString().padLeft(4, '0')}-'
+        '${value.month.toString().padLeft(2, '0')}-'
+        '${value.day.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _showEditJobDialog(SurveyJob job) async {
+    if (!job.canEdit) return;
+
+    final clientName = TextEditingController(text: job.clientName ?? '');
+    final projectName = TextEditingController(text: job.projectName ?? '');
+    final auditPort = TextEditingController(
+      text: job.auditPort ?? job.siteName ?? '',
+    );
+    final auditAddress = TextEditingController(text: job.auditAddress ?? '');
+    final startDate = TextEditingController(text: _dateInput(job.startDate));
+    final surveyDate = TextEditingController(text: _dateInput(job.surveyDate));
+    final endDate = TextEditingController(text: _dateInput(job.endDate));
+    Vessel? selectedJobVessel;
+    for (final vessel in vessels) {
+      if (vessel.id == job.vesselId) selectedJobVessel = vessel;
+    }
+    selectedJobVessel ??= job.vesselId == null
+        ? null
+        : Vessel(
+            id: job.vesselId!,
+            vesselName: job.vesselName ?? 'Selected vessel',
+            imoNumber: job.imoNumber,
+            status: 'Active',
+          );
+    final vesselOptions = [...vessels];
+    if (selectedJobVessel != null &&
+        !vesselOptions.any((vessel) => vessel.id == selectedJobVessel!.id)) {
+      vesselOptions.add(selectedJobVessel!);
+    }
+    SurveyorOption? assignedManager = job.assignedManagerId == null
+        ? null
+        : _findManagerOption(job.assignedManagerId!);
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text('Edit ${job.jobNumber}'),
+              content: SizedBox(
+                width: 520,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      DropdownButtonFormField<Vessel>(
+                        value: selectedJobVessel,
+                        decoration: const InputDecoration(
+                          labelText: 'Vessel *',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: vesselOptions.map((vessel) {
+                          return DropdownMenuItem<Vessel>(
+                            value: vessel,
+                            child: Text(
+                              '${vessel.vesselName}${(vessel.imoNumber ?? '').isEmpty ? '' : ' - IMO ${vessel.imoNumber}'}',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setDialogState(() {
+                            selectedJobVessel = value;
+                            if ((value?.clientName ?? '').isNotEmpty) {
+                              clientName.text = value!.clientName!;
+                            }
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: clientName,
+                        decoration: const InputDecoration(
+                          labelText: 'Client',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: projectName,
+                        decoration: const InputDecoration(
+                          labelText: 'Project',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: auditPort,
+                        decoration: const InputDecoration(
+                          labelText: 'Site / Audit Port *',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: auditAddress,
+                        decoration: const InputDecoration(
+                          labelText: 'Audit Address',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: startDate,
+                        decoration: const InputDecoration(
+                          labelText: 'Start Date *',
+                          hintText: 'YYYY-MM-DD',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: surveyDate,
+                        decoration: const InputDecoration(
+                          labelText: 'Survey Date',
+                          hintText: 'YYYY-MM-DD',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: endDate,
+                        decoration: const InputDecoration(
+                          labelText: 'End Date *',
+                          hintText: 'YYYY-MM-DD',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<SurveyorOption?>(
+                        value: assignedManager,
+                        decoration: const InputDecoration(
+                          labelText: 'Assigned Manager',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          const DropdownMenuItem<SurveyorOption?>(
+                            value: null,
+                            child: Text('No manager assigned'),
+                          ),
+                          ...managers.map(
+                            (manager) => DropdownMenuItem<SurveyorOption?>(
+                              value: manager,
+                              child: Text(manager.displayName),
+                            ),
+                          ),
+                        ],
+                        onChanged: (value) =>
+                            setDialogState(() => assignedManager = value),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.check, size: 18),
+                  label: const Text('Save'),
+                  onPressed: () async {
+                    if (selectedJobVessel == null ||
+                        auditPort.text.trim().isEmpty ||
+                        startDate.text.trim().isEmpty ||
+                        endDate.text.trim().isEmpty) {
+                      AppDialog.warning(
+                        context,
+                        title: 'Missing details',
+                        message:
+                            'Vessel, audit port, start date and end date are required.',
+                      );
+                      return;
+                    }
+
+                    final result = await AppDialog.execute<bool>(
+                      context,
+                      loadingMessage: 'Updating job...',
+                      action: () async {
+                        await ApiService.updateSurveyJob(
+                          jobId: job.id,
+                          vesselId: selectedJobVessel!.id,
+                          clientName: clientName.text.trim(),
+                          projectName: projectName.text.trim(),
+                          siteName: auditPort.text.trim(),
+                          auditPort: auditPort.text.trim(),
+                          auditAddress: auditAddress.text.trim(),
+                          startDate: startDate.text.trim(),
+                          surveyDate: surveyDate.text.trim().isEmpty
+                              ? null
+                              : surveyDate.text.trim(),
+                          endDate: endDate.text.trim(),
+                          assignedManagerId: assignedManager?.id,
+                        );
+                        await ApiService.updateSurveyJobAssignedManager(
+                          surveyJobId: job.id,
+                          assignedManagerId: assignedManager?.id,
+                        );
+                        return true;
+                      },
+                      successTitle: 'Job updated',
+                      successMessage:
+                          '${job.jobNumber} was updated successfully.',
+                      errorTitle: 'Unable to update job',
+                    );
+
+                    if (result == true && dialogContext.mounted) {
+                      Navigator.pop(dialogContext, true);
+                    }
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    clientName.dispose();
+    projectName.dispose();
+    auditPort.dispose();
+    auditAddress.dispose();
+    startDate.dispose();
+    surveyDate.dispose();
+    endDate.dispose();
+
+    if (saved == true && mounted) {
+      await _loadJobs(showLoading: false);
+    }
   }
 
   // ─── Assign Surveyor Dialog ─────────────────────────────────────────────────
@@ -1369,9 +1698,15 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
-              insetPadding: const EdgeInsets.all(32),
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 24,
+              ),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 520),
+                constraints: BoxConstraints(
+                  maxWidth: 520,
+                  maxHeight: MediaQuery.of(context).size.height * 0.86,
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -1441,10 +1776,18 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
                       ),
                     ),
 
-                    Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        children: [
+                    Flexible(
+                      child: SingleChildScrollView(
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        padding: EdgeInsets.fromLTRB(
+                          24,
+                          24,
+                          24,
+                          24 + MediaQuery.of(context).viewInsets.bottom,
+                        ),
+                        child: Column(
+                          children: [
                           DropdownButtonFormField<SurveyorOption?>(
                             value: assignedManager,
                             decoration: InputDecoration(
@@ -1694,12 +2037,19 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
                               });
                             },
                           ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
 
                     Container(
-                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+                      padding: const EdgeInsets.fromLTRB(24, 12, 24, 20),
+                      decoration: const BoxDecoration(
+                        color: _AppColors.surface,
+                        border: Border(
+                          top: BorderSide(color: _AppColors.divider, width: 1),
+                        ),
+                      ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
@@ -1791,7 +2141,7 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
 
     if (assigned == true) {
       _showMessage('Surveyors updated successfully.');
-      await _loadJobs();
+      await _loadJobs(showLoading: false);
     }
   }
 
@@ -2165,7 +2515,8 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
   // ─── Job Card ────────────────────────────────────────────────────────────────
   Widget _jobCard(SurveyJob job) {
     final isIhm = widget.surveyType == 'IHM Survey';
-    final statusColor = _statusColor(job.status);
+    final displayStatus = job.displayStatus;
+    final statusColor = _statusColor(displayStatus);
     final theme = _theme;
 
     return Container(
@@ -2251,13 +2602,13 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            _statusIcon(job.status),
+                            _statusIcon(displayStatus),
                             size: 12,
                             color: statusColor,
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            job.status,
+                            displayStatus,
                             style: TextStyle(
                               color: statusColor,
                               fontSize: 11,
@@ -2306,7 +2657,14 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
                       color: _AppColors.ocean,
                       onTap: () => _openJob(job),
                     ),
-                    if (isAdmin)
+                    if (job.canEdit)
+                      _actionButton(
+                        icon: Icons.edit_outlined,
+                        label: 'Edit',
+                        color: _AppColors.amber,
+                        onTap: () => _showEditJobDialog(job),
+                      ),
+                    if (job.canEdit)
                       _actionButton(
                         icon: job.hasAssignedSurveyors
                             ? Icons.swap_horiz
@@ -2317,7 +2675,7 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
                         color: _AppColors.teal,
                         onTap: () => _showAssignSurveyorDialog(job),
                       ),
-                    if (isAdmin)
+                    if (job.canEdit)
                       _actionButton(
                         icon: Icons.delete_outline,
                         label: 'Delete',
@@ -2325,9 +2683,19 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
                         onTap: () => _deleteJob(job),
                       ),
                     if (isAdmin && isIhm) ...[
+                      if ((job.vscpChecklistFilePath ?? '').trim().isNotEmpty)
+                        _actionButton(
+                          icon: Icons.visibility_outlined,
+                          label: 'View VSCP Checklist',
+                          color: _AppColors.deepPurple,
+                          onTap: () => _viewVscpChecklist(job),
+                        ),
                       _actionButton(
                         icon: Icons.table_chart_outlined,
-                        label: 'Upload Excel',
+                        label:
+                            (job.vscpChecklistFilePath ?? '').trim().isNotEmpty
+                            ? 'Replace VSCP Checklist Template'
+                            : 'Upload VSCP Checklist Template',
                         color: _AppColors.success,
                         onTap: () => _uploadIhmExcel(job),
                       ),
@@ -2351,6 +2719,7 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
   Widget _buildJobMetaGrid(SurveyJob job) {
     final primaryName = job.primarySurveyorName;
     final secondaryName = job.secondarySurveyorName;
+    final canEditSurveyDate = _canEditSurveyDate(job);
 
     final tiles = <Widget>[
       _metaTile(
@@ -2360,10 +2729,10 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
             : _formatSurveyDate(job.surveyDate!),
         icon: Icons.calendar_today_outlined,
         color: _AppColors.ocean,
-        onTap: isAdmin ? null : () => _pickAndSaveSurveyDate(job),
-        actionText: isAdmin
-            ? null
-            : (job.surveyDate == null ? 'Select' : 'Change'),
+        onTap: canEditSurveyDate ? () => _pickAndSaveSurveyDate(job) : null,
+        actionText: canEditSurveyDate
+            ? (job.surveyDate == null ? 'Select' : 'Change')
+            : null,
       ),
       if (job.assignedManagerName != null &&
           job.assignedManagerName!.trim().isNotEmpty)

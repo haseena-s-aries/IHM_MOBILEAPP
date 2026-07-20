@@ -1,6 +1,7 @@
 import 'package:Auras/model/survey_job.dart';
 import 'package:Auras/service/api_service.dart';
 import 'package:Auras/screen/screen/ihm_conflict_review_screen.dart';
+import 'package:Auras/service/survey_job_offline_service.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -23,7 +24,7 @@ class _AppColors {
   static const Color purple = Color(0xFF7B1FA2);
 }
 
-class SurveyJobDetailsScreen extends StatelessWidget {
+class SurveyJobDetailsScreen extends StatefulWidget {
   final SurveyJob job;
   final String surveyType;
 
@@ -33,24 +34,41 @@ class SurveyJobDetailsScreen extends StatelessWidget {
     required this.surveyType,
   });
 
+  @override
+  State<SurveyJobDetailsScreen> createState() => _SurveyJobDetailsScreenState();
+}
+
+class _SurveyJobDetailsScreenState extends State<SurveyJobDetailsScreen> {
+  late SurveyJob job;
+  int _currentUserId = 0;
+
+  String get surveyType => widget.surveyType;
+
+  @override
+  void initState() {
+    super.initState();
+    job = widget.job;
+    _loadCurrentUser();
+  }
+
+  Future<void> _loadCurrentUser() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _currentUserId = prefs.getInt('userId') ?? 0;
+    });
+  }
+
   Color _statusColor(String status) {
     switch (status) {
-      case 'Draft':
-        return _AppColors.textMuted;
-      case 'Assigned':
-        return _AppColors.ocean;
-      case 'InProgress':
-        return _AppColors.amber;
-      case 'Submitted':
-        return _AppColors.purple;
-      case 'Approved':
+      case 'Completed':
         return _AppColors.success;
-      case 'ReportGenerated':
-        return _AppColors.teal;
-      case 'Closed':
-        return _AppColors.textSecondary;
-      case 'QcReturned':
-        return _AppColors.red;
+      case 'Pending':
+        return _AppColors.amber;
+      case 'In Progress':
+        return _AppColors.ocean;
+      case 'Not Started':
+        return _AppColors.textMuted;
       default:
         return _AppColors.textMuted;
     }
@@ -58,31 +76,86 @@ class SurveyJobDetailsScreen extends StatelessWidget {
 
   IconData _statusIcon(String status) {
     switch (status) {
-      case 'Draft':
-        return Icons.edit_note;
-      case 'Assigned':
-        return Icons.person_pin_circle;
-      case 'InProgress':
+      case 'Completed':
+        return Icons.check_circle_outline;
+      case 'Pending':
+        return Icons.schedule_rounded;
+      case 'In Progress':
         return Icons.pending_actions;
-      case 'Submitted':
-        return Icons.upload_file;
-      case 'Approved':
-        return Icons.verified;
-      case 'ReportGenerated':
-        return Icons.summarize;
-      case 'Closed':
-        return Icons.lock_outline;
-      case 'QcReturned':
-        return Icons.replay_circle_filled;
+      case 'Not Started':
+        return Icons.radio_button_unchecked;
       default:
         return Icons.help_outline;
+    }
+  }
+
+  String _formatSurveyDate(DateTime date) {
+    final day = date.day.toString().padLeft(2, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    return '$day-$month-${date.year}';
+  }
+
+  bool _canEditSurveyDate() {
+    if (job.canEdit) return true;
+    if (_currentUserId <= 0) return false;
+    if (job.assignedUserId == _currentUserId) return true;
+    if (job.primarySurveyorUserId == _currentUserId) return true;
+    if (job.secondarySurveyorUserId == _currentUserId) return true;
+    return false;
+  }
+
+  Future<void> _pickAndSaveSurveyDate() async {
+    if (!_canEditSurveyDate()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You are not allowed to edit this survey date.'),
+        ),
+      );
+      return;
+    }
+
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: job.surveyDate ?? DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+
+    if (picked == null) return;
+
+    try {
+      await SurveyJobOfflineService.updateSurveyDate(
+        job: job,
+        surveyDate: picked,
+      );
+
+      if (!mounted) return;
+      final updatedJob = SurveyJob.fromJson({
+        ...job.toJson(),
+        'surveyDate': picked.toIso8601String(),
+        'displayStatus':
+            job.totalItems > 0 && job.completedItems >= job.totalItems
+            ? 'Completed'
+            : (job.completedItems > 0 ? 'Pending' : 'In Progress'),
+      });
+      setState(() => job = updatedJob);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Survey date saved successfully.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final isIhm = surveyType == 'IHM Survey';
-    final statusColor = _statusColor(job.status);
+    final displayStatus = job.displayStatus;
+    final statusColor = _statusColor(displayStatus);
+    final canEditSurveyDate = _canEditSurveyDate();
 
     return Scaffold(
       backgroundColor: _AppColors.surface,
@@ -193,13 +266,13 @@ class SurveyJobDetailsScreen extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            _statusIcon(job.status),
+                            _statusIcon(displayStatus),
                             size: 13,
                             color: statusColor,
                           ),
                           const SizedBox(width: 5),
                           Text(
-                            job.status,
+                            displayStatus,
                             style: TextStyle(
                               color: statusColor,
                               fontSize: 12,
@@ -284,6 +357,19 @@ class SurveyJobDetailsScreen extends StatelessWidget {
                       ),
                       if (isIhm)
                         _infoRow(Icons.numbers, 'IMO Number', job.imoNumber),
+                      _infoRow(
+                        Icons.calendar_today_outlined,
+                        'Survey Date',
+                        job.surveyDate == null
+                            ? 'Not selected'
+                            : _formatSurveyDate(job.surveyDate!),
+                        onTap: canEditSurveyDate
+                            ? _pickAndSaveSurveyDate
+                            : null,
+                        actionText: canEditSurveyDate
+                            ? (job.surveyDate == null ? 'Select' : 'Change')
+                            : null,
+                      ),
                       _infoRow(
                         Icons.location_on_outlined,
                         'Site',
@@ -646,42 +732,68 @@ class SurveyJobDetailsScreen extends StatelessWidget {
     String label,
     String? value, {
     bool isLast = false,
+    VoidCallback? onTap,
+    String? actionText,
   }) {
     final displayValue = value == null || value.trim().isEmpty
         ? '—'
         : value.trim();
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: _AppColors.textMuted),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 110,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                color: _AppColors.textSecondary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              displayValue,
+              style: const TextStyle(
+                fontSize: 14,
+                color: _AppColors.textPrimary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          if (actionText != null) ...[
+            const SizedBox(width: 8),
+            Text(
+              actionText,
+              style: const TextStyle(
+                color: _AppColors.ocean,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(
+              Icons.edit_calendar_outlined,
+              color: _AppColors.ocean,
+              size: 16,
+            ),
+          ],
+        ],
+      ),
+    );
+
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Row(
-            children: [
-              Icon(icon, size: 16, color: _AppColors.textMuted),
-              const SizedBox(width: 10),
-              SizedBox(
-                width: 110,
-                child: Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: _AppColors.textSecondary,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+        onTap == null
+            ? row
+            : Material(
+                color: Colors.transparent,
+                child: InkWell(onTap: onTap, child: row),
               ),
-              Expanded(
-                child: Text(
-                  displayValue,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: _AppColors.textPrimary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
         if (!isLast)
           Divider(
             color: _AppColors.divider.withOpacity(0.6),

@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:Auras/ThemeNotifier.dart';
 import 'package:Auras/Db/database_helper.dart';
-import 'package:Auras/main.dart';
 import 'package:Auras/model/TotalCertificateCountDto.dart';
 import 'package:Auras/model/app_notification.dart';
 import 'package:Auras/screen/screen/Loadout_certificate_screen.dart';
@@ -36,6 +35,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool isLoading = true;
   List<AppNotification> _notifications = const [];
   Timer? _notificationTimer;
+  StreamSubscription<ConnectivityResult>? _connectivitySubscription;
   bool _notificationsLoaded = false;
 
   String get _projectName =>
@@ -66,7 +66,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
 
     // 🔁 Auto-sync when online, then refresh dashboard
-    Connectivity().onConnectivityChanged.listen((result) async {
+    _connectivitySubscription =
+        Connectivity().onConnectivityChanged.listen((result) async {
       if (result != ConnectivityResult.none) {
         await SyncService.syncAllOfflineData();
         await SyncService.syncFromServerToLocal();
@@ -80,7 +81,170 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void dispose() {
     _notificationTimer?.cancel();
+    _connectivitySubscription?.cancel();
     super.dispose();
+  }
+
+  Future<void> _runManualSync() async {
+    final snapshot = await SyncService.syncAllOfflineData(manual: true);
+    if (!mounted) return;
+    if (snapshot.state == 'synced' || snapshot.state == 'failed') {
+      await _fetchCertificateReport();
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(snapshot.message ?? snapshot.label),
+        action: snapshot.failedCount > 0
+            ? SnackBarAction(
+                label: 'Retry',
+                onPressed: () => _runManualSync(),
+              )
+            : null,
+      ),
+    );
+  }
+
+  Widget _buildAppBarSyncButton(SyncSnapshot snapshot) {
+    final label = snapshot.pendingCount > 0 && !snapshot.isSyncing
+        ? '${snapshot.label} (${snapshot.pendingCount})'
+        : snapshot.label;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: TextButton.icon(
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.white,
+          disabledForegroundColor: Colors.white70,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          minimumSize: const Size(0, 40),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        onPressed: snapshot.isSyncing ? null : _runManualSync,
+        onLongPress: () => _showSyncDetails(snapshot),
+        icon: snapshot.isSyncing
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              )
+            : Icon(_syncIcon(snapshot), size: 19),
+        label: Text(
+          label,
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+        ),
+      ),
+    );
+  }
+
+  IconData _syncIcon(SyncSnapshot snapshot) {
+    if (snapshot.state == 'offline') return Icons.cloud_off_rounded;
+    if (snapshot.state == 'failed') return Icons.sync_problem_rounded;
+    if (snapshot.state == 'synced') return Icons.cloud_done_rounded;
+    return Icons.sync_rounded;
+  }
+
+  void _showSyncDetails(SyncSnapshot snapshot) {
+    final lastSynced = snapshot.lastSyncedAt == null
+        ? 'Never'
+        : _formatSyncDateTime(snapshot.lastSyncedAt!);
+
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Sync Status',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                const SizedBox(height: 12),
+                _syncDetailRow('Status', snapshot.label),
+                _syncDetailRow('Last synced', lastSynced),
+                _syncDetailRow(
+                  'Pending items',
+                  snapshot.pendingCount.toString(),
+                ),
+                _syncDetailRow('Failed items', snapshot.failedCount.toString()),
+                _syncDetailRow(
+                  'Downloaded jobs',
+                  snapshot.downloadedJobCount.toString(),
+                ),
+                _syncDetailRow(
+                  'Uploaded items',
+                  snapshot.uploadedItemCount.toString(),
+                ),
+                if ((snapshot.message ?? '').isNotEmpty)
+                  _syncDetailRow('Message', snapshot.message!),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: snapshot.isSyncing
+                            ? null
+                            : () {
+                                Navigator.pop(context);
+                                _runManualSync();
+                              },
+                        icon: const Icon(Icons.sync_rounded),
+                        label: Text(
+                          snapshot.failedCount > 0 ? 'Retry' : 'Sync now',
+                        ),
+                      ),
+                    ),
+                    if (snapshot.isSyncing) ...[
+                      const SizedBox(width: 10),
+                      OutlinedButton(
+                        onPressed: SyncService.requestCancel,
+                        child: const Text('Cancel'),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _syncDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 120,
+            child: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+          Expanded(child: Text(value)),
+        ],
+      ),
+    );
+  }
+
+  String _formatSyncDateTime(DateTime value) {
+    final local = value.toLocal();
+    String two(int number) => number.toString().padLeft(2, '0');
+    return '${two(local.day)}/${two(local.month)}/${local.year} '
+        '${two(local.hour)}:${two(local.minute)}';
   }
 
   int get _unreadNotificationCount =>
@@ -1015,6 +1179,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
             ],
           ),
+          ValueListenableBuilder<SyncSnapshot>(
+            valueListenable: SyncService.syncStatus,
+            builder: (context, snapshot, _) =>
+                _buildAppBarSyncButton(snapshot),
+          ),
           IconButton(
             tooltip: themeNotifier.isDarkMode ? 'Light mode' : 'Dark mode',
             icon: Icon(
@@ -1025,37 +1194,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onPressed: themeNotifier.toggleTheme,
           ),
           IconButton(
-            icon: const Icon(Icons.cloud_download),
-            tooltip: 'Sync from Server',
-            onPressed: () async {
-              // Check internet before syncing
-              final hasInternet = await checkInternetConnection();
-              if (hasInternet) {
-                await syncCertificates(context); // Your existing sync logic
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Data synced successfully ✅"),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-              } else {
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("No internet connection ❌"),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-              }
-            },
-          ),
-          IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Logout',
             onPressed: () async {
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.clear();
+              try {
+                await SyncService.logoutAndClearUserData();
+              } catch (error) {
+                debugPrint('Logout failed during cleanup: $error');
+              }
               if (!context.mounted) return;
               Navigator.pushNamedAndRemoveUntil(
                 context,

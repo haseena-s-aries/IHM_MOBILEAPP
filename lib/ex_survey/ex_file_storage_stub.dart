@@ -11,3 +11,5 @@ Future<String> writeExLocalFile(
 Future<Uint8List> readExLocalFile(String path) {
   throw UnsupportedError('Offline file storage is not available on this platform.');
 }
+
+Future<void> clearExLocalFiles() async {}

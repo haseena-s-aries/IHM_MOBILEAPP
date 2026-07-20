@@ -3,7 +3,9 @@ import 'dart:typed_data';
 
 import 'package:Auras/Db/database_helper.dart';
 import 'package:Auras/ihm_area.dart';
+import 'package:Auras/model/survey_job.dart';
 import 'package:Auras/service/api_service.dart';
+import 'package:Auras/service/survey_job_offline_service.dart';
 import 'package:Auras/service/ihm_photo_storage_stub.dart'
     if (dart.library.io) 'package:Auras/service/ihm_photo_storage_io.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -231,6 +233,9 @@ class IhmOfflineService {
         );
         final db = await DatabaseHelper.instance.database;
         await _replaceLocalCheckpoint(db, saved, synced: 1);
+        await SurveyJobOfflineService.refreshCachedIhmDisplayStatus(
+          saved.surveyJobId,
+        );
         debugPrint(
           '[IHM] checkpoint ${checkpoint.id} saved online and cached: '
           'result=${saved.result}',
@@ -259,6 +264,9 @@ class IhmOfflineService {
       },
       where: 'id = ?',
       whereArgs: [checkpoint.id],
+    );
+    await SurveyJobOfflineService.refreshCachedIhmDisplayStatus(
+      checkpoint.surveyJobId,
     );
 
     await _enqueue(
@@ -292,6 +300,9 @@ class IhmOfflineService {
         );
         final db = await DatabaseHelper.instance.database;
         await _replaceLocalCheckpoint(db, saved, synced: 1);
+        await SurveyJobOfflineService.refreshCachedIhmDisplayStatus(
+          saved.surveyJobId,
+        );
         debugPrint(
           '[IHM] full checkpoint ${checkpoint.id} saved online and cached: '
           'result=${saved.result}',
@@ -314,6 +325,9 @@ class IhmOfflineService {
       values,
       where: 'id = ?',
       whereArgs: [checkpoint.id],
+    );
+    await SurveyJobOfflineService.refreshCachedIhmDisplayStatus(
+      checkpoint.surveyJobId,
     );
     await _enqueue(
       entityType: 'checkpointDetails',
@@ -695,7 +709,7 @@ final existing = existingRows
 
   static Future<void> syncPendingIhmData() async {
     if (kIsWeb) return;
-    if (_syncing || !await isOnline) return;
+    if (_syncing || !(await isOnline)) return;
 
     _syncing = true;
     final db = await DatabaseHelper.instance.database;
@@ -704,7 +718,7 @@ final existing = existingRows
       final queue = await db.query(
         'ihm_sync_queue',
         where: 'status IN (0, 2)',
-        orderBy: 'id ASC',
+        orderBy: "CASE WHEN entityType = 'photo' THEN 1 ELSE 0 END, id ASC",
       );
 
       for (final item in queue) {
@@ -757,6 +771,164 @@ final existing = existingRows
     );
 
     return _int(result.first['count']);
+  }
+
+  static Future<int> failedSyncCount() async {
+    if (kIsWeb) return 0;
+
+    final db = await DatabaseHelper.instance.database;
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) AS count FROM ihm_sync_queue WHERE status = 2',
+    );
+
+    return _int(result.first['count']);
+  }
+
+  static Future<int> cacheJobForOffline(SurveyJob job) async {
+    if (kIsWeb || job.id <= 0 || !(await isOnline)) return 0;
+
+    var cachedJobs = 0;
+    final hasVscpChecklist =
+        (job.vscpChecklistFilePath ?? '').trim().isNotEmpty;
+
+    if (hasVscpChecklist) {
+      await cacheVscpChecklist(
+        jobId: job.id,
+        fileName: job.vscpChecklistFileName,
+        serverPath: job.vscpChecklistFilePath,
+      );
+    }
+
+    final areas = await ApiService.fetchIhmAreasWithCheckpoints(job.id);
+    await cacheAreas(job.id, areas);
+
+    try {
+      final markers = await ApiService.fetchIhmMarkers(job.id);
+      await _cacheMarkers(job.id, markers);
+    } catch (_) {}
+
+    for (final area in areas) {
+      try {
+        final layouts = await ApiService.fetchIhmLayouts(
+          jobId: job.id,
+          areaId: area.id,
+        );
+        await _cacheLayouts(job.id, area.id, layouts);
+      } catch (_) {}
+
+      for (final checkpoint in area.checkpoints) {
+        try {
+          final photos = await ApiService.fetchCheckpointPhotos(checkpoint.id);
+          await _cachePhotos(checkpoint, photos);
+        } catch (_) {}
+      }
+    }
+
+    cachedJobs++;
+    return cachedJobs;
+  }
+
+  static Future<void> cacheVscpChecklist({
+    required int jobId,
+    required String? fileName,
+    required String? serverPath,
+  }) async {
+    if (kIsWeb || !(await isOnline)) return;
+
+    final pathKey = (serverPath ?? '/ihm-survey/jobs/$jobId/vscp-checklist')
+        .trim();
+    if (pathKey.isEmpty) return;
+
+    final db = await DatabaseHelper.instance.database;
+    final existing = await db.query(
+      'ihm_cached_files',
+      columns: ['localPath'],
+      where: 'surveyJobId = ? AND fileType = ? AND serverPath = ?',
+      whereArgs: [jobId, 'vscpChecklist', pathKey],
+      limit: 1,
+    );
+    final existingLocalPath = existing.isEmpty
+        ? null
+        : existing.first['localPath']?.toString();
+
+    if (existingLocalPath != null &&
+        existingLocalPath.isNotEmpty &&
+        await _canReadLocalFile(existingLocalPath)) {
+      return;
+    }
+
+    try {
+      final bytes = await ApiService.downloadVscpChecklist(jobId);
+      if (bytes.isEmpty) return;
+
+      final localPath = await writeIhmLocalFile(
+        bytes,
+        _safeFileName(
+          (fileName ?? '').trim().isEmpty
+              ? 'vscp-checklist-$jobId.xlsx'
+              : fileName!.trim(),
+        ),
+        folderName: 'ihm_vscp_checklists',
+      );
+      final now = DateTime.now().toIso8601String();
+
+      await db.insert(
+        'ihm_cached_files',
+        {
+          'surveyJobId': jobId,
+          'fileType': 'vscpChecklist',
+          'serverPath': pathKey,
+          'localPath': localPath,
+          'fileName': fileName,
+          'updatedAt': now,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    } catch (_) {}
+  }
+
+  static Future<String?> getCachedVscpChecklistLocalPath(int jobId) async {
+    if (kIsWeb) return null;
+
+    final db = await DatabaseHelper.instance.database;
+    final rows = await db.query(
+      'ihm_cached_files',
+      columns: ['localPath'],
+      where: 'surveyJobId = ? AND fileType = ?',
+      whereArgs: [jobId, 'vscpChecklist'],
+      orderBy: 'updatedAt DESC',
+      limit: 1,
+    );
+
+    if (rows.isEmpty) return null;
+    final localPath = rows.first['localPath']?.toString();
+    if (localPath == null ||
+        localPath.isEmpty ||
+        !(await _canReadLocalFile(localPath))) {
+      return null;
+    }
+    return localPath;
+  }
+
+  static Future<void> clearLocalUserData() async {
+    if (kIsWeb) return;
+
+    final db = await DatabaseHelper.instance.database;
+    for (final table in [
+      'survey_jobs_cache',
+      'ihm_areas',
+      'ihm_checkpoints',
+      'ihm_markers',
+      'ihm_sampling_photos',
+      'ihm_layout_images',
+      'ihm_sync_queue',
+      'ihm_cached_files',
+      'sync_metadata',
+    ]) {
+      await db.delete(table);
+    }
+
+    await clearIhmLocalFiles();
   }
 
   static Future<void> _syncQueueItem(
@@ -1215,5 +1387,9 @@ final existing = existingRows
         ? ''
         : parsed.pathSegments.last;
     return name.trim().isEmpty ? fallbackFileName : name;
+  }
+
+  static String _safeFileName(String fileName) {
+    return fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
   }
 }

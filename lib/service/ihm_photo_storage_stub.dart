@@ -15,3 +15,5 @@ Future<String> writeIhmLocalFile(
 Future<Uint8List> readIhmLocalPhoto(String path) {
   throw UnsupportedError('Offline photo storage is not available on this platform.');
 }
+
+Future<void> clearIhmLocalFiles() async {}

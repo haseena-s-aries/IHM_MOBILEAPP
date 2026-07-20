@@ -25,6 +25,10 @@ class Vessel {
   final String? managerName;
   final String? clientName;
   final String status;
+  final int? createdByUserId;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+  final bool canEdit;
 
   Vessel({
     required this.id,
@@ -51,6 +55,10 @@ class Vessel {
     this.managerName,
     this.clientName,
     required this.status,
+    this.createdByUserId,
+    this.createdAt,
+    this.updatedAt,
+    this.canEdit = false,
   });
 
   factory Vessel.fromJson(Map<String, dynamic> json) {
@@ -81,6 +89,14 @@ class Vessel {
       managerName: json['managerName']?.toString(),
       clientName: json['clientName']?.toString(),
       status: json['status']?.toString() ?? '',
+      createdByUserId: _toInt(json['createdByUserId'] ?? json['CreatedByUserId']),
+      createdAt: _toDateTime(json['createdAt'] ?? json['CreatedAt']),
+      updatedAt: _toDateTime(json['updatedAt'] ?? json['UpdatedAt']),
+      canEdit:
+          json['canEdit'] == true ||
+          json['CanEdit'] == true ||
+          json['canEdit']?.toString().toLowerCase() == 'true' ||
+          json['CanEdit']?.toString().toLowerCase() == 'true',
     );
   }
 
@@ -119,5 +135,10 @@ class Vessel {
   static int? _toInt(dynamic value) {
     if (value == null) return null;
     return int.tryParse(value.toString());
+  }
+
+  static DateTime? _toDateTime(dynamic value) {
+    if (value == null) return null;
+    return DateTime.tryParse(value.toString());
   }
 }

@@ -438,7 +438,7 @@ class ApiService {
   }) async {
     final response = await http.put(
       Uri.parse('$baseUrl/vessels/$vesselId'),
-      headers: {'Content-Type': 'application/json'},
+      headers: await _authHeaders(json: true),
       body: jsonEncode(data),
     );
 
@@ -557,13 +557,29 @@ class ApiService {
   }
 
   static Future<Vessel> fetchVesselById(int id) async {
-    final response = await http.get(Uri.parse('$baseUrl/vessels/$id'));
+    final response = await http.get(
+      Uri.parse('$baseUrl/vessels/$id'),
+      headers: await _authHeaders(),
+    );
 
     if (response.statusCode == 200) {
       return Vessel.fromJson(jsonDecode(response.body));
     }
 
     throw Exception('Failed to load vessel: ${response.body}');
+  }
+
+  static Future<SurveyJob> fetchSurveyJobById(int id) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/survey/jobs/$id'),
+      headers: await _authHeaders(),
+    );
+
+    if (response.statusCode == 200) {
+      return SurveyJob.fromJson(jsonDecode(response.body));
+    }
+
+    throw Exception('Failed to load survey job: ${response.body}');
   }
 
   static Future<List<SurveyorOption>> fetchSurveyors() async {
@@ -749,7 +765,6 @@ class ApiService {
       'totalSurveyJobs': readInt('totalSurveyJobs'),
       'ihmSurveyJobs': readInt('ihmSurveyJobs'),
       'exSurveyJobs': readInt('exSurveyJobs'),
-      'submittedJobs': readInt('submittedJobs'),
       'approvedJobs': readInt('approvedJobs'),
       'closedJobs': readInt('closedJobs'),
       'liveJobs': readInt('ihmLiveJobs') > 0 || readInt('ihmCompletedJobs') > 0
@@ -856,6 +871,43 @@ class ApiService {
     }
   }
 
+  static Future<SurveyJob> updateSurveyJob({
+    required int jobId,
+    required int vesselId,
+    String? clientName,
+    String? projectName,
+    String? siteName,
+    String? startDate,
+    String? surveyDate,
+    String? endDate,
+    String? auditPort,
+    String? auditAddress,
+    int? assignedManagerId,
+  }) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/survey/jobs/$jobId'),
+      headers: await _authHeaders(json: true),
+      body: jsonEncode({
+        'vesselId': vesselId,
+        'clientName': clientName,
+        'projectName': projectName,
+        'siteName': siteName,
+        'startDate': startDate,
+        'surveyDate': surveyDate,
+        'endDate': endDate,
+        'auditPort': auditPort,
+        'auditAddress': auditAddress,
+        'assignedManagerId': assignedManagerId,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to update survey job: ${response.body}');
+    }
+
+    return SurveyJob.fromJson(jsonDecode(response.body));
+  }
+
   static Future<List<Vessel>> fetchVessels() async {
     final response = await http.get(
       Uri.parse('$baseUrl/vessels'),
@@ -899,7 +951,7 @@ class ApiService {
   }) async {
     final response = await http.post(
       Uri.parse('$baseUrl/vessels'),
-      headers: {'Content-Type': 'application/json'},
+      headers: await _authHeaders(json: true),
       body: jsonEncode({
         'vesselName': vesselName,
         'imoNumber': imoNumber,
@@ -937,6 +989,7 @@ class ApiService {
   static Future<void> deleteVessel(int vesselId) async {
     final response = await http.post(
       Uri.parse('$baseUrl/vessels/$vesselId/deactivate'),
+      headers: await _authHeaders(),
     );
 
     if (response.statusCode != 200 && response.statusCode != 204) {
@@ -1130,8 +1183,10 @@ class ApiService {
     }),
   );
 
-  if (response.statusCode != 200) {
-    throw Exception("Failed to update survey date: ${response.body}");
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw Exception(
+      "Failed to update survey date (${response.statusCode}): ${response.body}",
+    );
   }
 }
   static Future<void> updateSurveyJobStatus({
@@ -1772,7 +1827,7 @@ class ApiService {
   }) async {
     final response = await http.put(
       Uri.parse('$baseUrl/ihm-survey/checkpoints/$checkpointId/procedure'),
-      headers: {'Content-Type': 'application/json'},
+      headers: await _authHeaders(json: true),
       body: jsonEncode({'procedureType': procedureType}),
     );
 
@@ -1786,6 +1841,7 @@ class ApiService {
   static Future<List<IhmArea>> fetchIhmAreasWithCheckpoints(int jobId) async {
     final response = await http.get(
       Uri.parse('$baseUrl/ihm-survey/jobs/$jobId/areas-with-checkpoints'),
+      headers: await _authHeaders(),
     );
 
     if (response.statusCode != 200) {
@@ -1849,6 +1905,7 @@ class ApiService {
     final url = Uri.parse('$baseUrl/ihm-survey/jobs/$jobId/import-excel');
 
     final request = http.MultipartRequest('POST', url);
+    request.headers.addAll(await _authHeaders());
 
     request.files.add(
       http.MultipartFile.fromBytes('file', fileBytes, filename: fileName),
@@ -1862,6 +1919,19 @@ class ApiService {
     }
 
     throw Exception('Excel upload failed: ${response.statusCode} - $body');
+  }
+
+  static Future<Uint8List> downloadVscpChecklist(int jobId) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/ihm-survey/jobs/$jobId/vscp-checklist'),
+      headers: await _authHeaders(),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to download VSCP Checklist: ${response.body}');
+    }
+
+    return response.bodyBytes;
   }
 
   // static Future<String> uploadIhmLayout({
@@ -1895,6 +1965,7 @@ class ApiService {
     final url = Uri.parse('$baseUrl/ihm-survey/jobs/$jobId/upload-image');
 
     final request = http.MultipartRequest('POST', url);
+    request.headers.addAll(await _authHeaders());
 
     request.files.add(
       http.MultipartFile.fromBytes('file', fileBytes, filename: fileName),
@@ -1926,7 +1997,7 @@ class ApiService {
 
     final response = await http.put(
       Uri.parse('$baseUrl/ihm-survey/checkpoints/${checkpoint.id}/details'),
-      headers: {'Content-Type': 'application/json'},
+      headers: await _authHeaders(json: true),
       body: jsonEncode(payload),
     );
 
@@ -2006,6 +2077,7 @@ class ApiService {
       'POST',
       Uri.parse('$baseUrl/ihm-survey/jobs/$jobId/areas/$areaId/layout'),
     );
+    request.headers.addAll(await _authHeaders());
 
     if (file.bytes != null) {
       request.files.add(
@@ -2035,6 +2107,7 @@ class ApiService {
   }) async {
     final res = await http.get(
       Uri.parse('$baseUrl/ihm-survey/jobs/$jobId/areas/$areaId/layout'),
+      headers: await _authHeaders(),
     );
 
     if (res.statusCode != 200) {
@@ -2050,6 +2123,7 @@ class ApiService {
   }) async {
     final res = await http.get(
       Uri.parse('$baseUrl/ihm-survey/jobs/$jobId/areas/$areaId/layouts'),
+      headers: await _authHeaders(),
     );
     if (res.statusCode != 200) throw Exception(res.body);
     final List data = jsonDecode(res.body);
@@ -2059,6 +2133,7 @@ class ApiService {
   static Future<void> deleteIhmMarker(int markerId) async {
     final res = await http.delete(
       Uri.parse('$baseUrl/ihm-survey/markers/$markerId'),
+      headers: await _authHeaders(),
     );
 
     if (res.statusCode != 200) {
@@ -2069,6 +2144,7 @@ class ApiService {
   static Future<List<IhmMarker>> fetchIhmMarkers(int jobId) async {
     final res = await http.get(
       Uri.parse('$baseUrl/ihm-survey/jobs/$jobId/markers'),
+      headers: await _authHeaders(),
     );
 
     if (res.statusCode != 200) {
@@ -2087,7 +2163,7 @@ class ApiService {
   }) async {
     final res = await http.post(
       Uri.parse('$baseUrl/ihm-survey/markers'),
-      headers: {'Content-Type': 'application/json'},
+      headers: await _authHeaders(json: true),
       body: jsonEncode({
         'surveyJobId': checkpoint.surveyJobId,
         'ihmAreaId': checkpoint.ihmAreaId,
@@ -2110,6 +2186,7 @@ class ApiService {
   ) async {
     final res = await http.get(
       Uri.parse('$baseUrl/ihm-survey/checkpoints/$checkpointId/photos'),
+      headers: await _authHeaders(),
     );
 
     if (res.statusCode != 200) {
@@ -2130,6 +2207,7 @@ class ApiService {
     );
 
     final request = http.MultipartRequest('POST', url);
+    request.headers.addAll(await _authHeaders());
     request.files.add(
       http.MultipartFile.fromBytes('file', fileBytes, filename: fileName),
     );
@@ -2147,6 +2225,7 @@ class ApiService {
   static Future<void> deleteCheckpointPhoto(int photoId) async {
     final res = await http.delete(
       Uri.parse('$baseUrl/ihm-survey/sampling-photos/$photoId'),
+      headers: await _authHeaders(),
     );
 
     if (res.statusCode != 200) {

@@ -46,22 +46,14 @@ class _VesselProfileScreenState extends State<VesselProfileScreen> {
 
   Color _statusColor(String status) {
     switch (status) {
-      case 'Draft':
-        return Colors.grey;
-      case 'Assigned':
-        return Colors.blue;
-      case 'InProgress':
-        return Colors.orange;
-      case 'Submitted':
-        return Colors.deepPurple;
-      case 'Approved':
+      case 'Completed':
         return Colors.green;
-      case 'ReportGenerated':
-        return Colors.teal;
-      case 'Closed':
-        return Colors.black54;
-      case 'QcReturned':
-        return Colors.red;
+      case 'Pending':
+        return Colors.orange;
+      case 'In Progress':
+        return Colors.blue;
+      case 'Not Started':
+        return Colors.grey;
       default:
         return Colors.blueGrey;
     }
@@ -254,10 +246,10 @@ class _VesselProfileScreenState extends State<VesselProfileScreen> {
             isThreeLine: true,
             trailing: Chip(
               label: Text(
-                job.status,
+                job.displayStatus,
                 style: const TextStyle(color: Colors.white),
               ),
-              backgroundColor: _statusColor(job.status),
+              backgroundColor: _statusColor(job.displayStatus),
             ),
             onTap: () {
               Navigator.push(

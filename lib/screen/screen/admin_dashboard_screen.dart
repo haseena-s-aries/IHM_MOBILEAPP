@@ -1,6 +1,7 @@
 import 'package:Auras/ThemeNotifier.dart';
 import 'package:Auras/model/PendingUser.dart';
 import 'package:Auras/model/TotalCertificateCountDto.dart';
+import 'package:Auras/model/survey_job.dart';
 import 'package:Auras/model/vessel.dart';
 import 'package:Auras/screen/screen/Loadout_certificate_screen.dart';
 import 'package:Auras/screen/screen/PendingApprovalsScreen.dart';
@@ -27,11 +28,11 @@ class SurveyDashboardStats {
   final int totalSurveyJobs;
   final int ihmSurveyJobs;
   final int exSurveyJobs;
-  final int submittedJobs;
   final int approvedJobs;
   final int closedJobs;
   final int liveJobs;
   final int completedJobs;
+  final int dueTodayJobs;
   final int ihmLiveJobs;
   final int exSurveyLiveJobs;
   final int exSurveyReports;
@@ -40,11 +41,11 @@ class SurveyDashboardStats {
     this.totalSurveyJobs = 0,
     this.ihmSurveyJobs = 0,
     this.exSurveyJobs = 0,
-    this.submittedJobs = 0,
     this.approvedJobs = 0,
     this.closedJobs = 0,
     this.liveJobs = 0,
     this.completedJobs = 0,
+    this.dueTodayJobs = 0,
     this.ihmLiveJobs = 0,
     this.exSurveyLiveJobs = 0,
     this.exSurveyReports = 0,
@@ -69,10 +70,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   String get _projectName =>
       widget.user['projectName']?.toString().trim().toLowerCase() ?? '';
 
-  bool get _isAdmin => _role == 'admin';
+  bool get _isAdmin =>
+      _role == 'admin' ||
+      _role == 'global admin' ||
+      _role == 'globaladmin' ||
+      _role == 'administrator';
+
+  bool get _isManager => _role == 'manager';
 
   bool get _hasAllProjectAccess =>
-      _isAdmin || _projectName.isEmpty || _projectName.contains('all');
+      _isAdmin || _projectName.contains('all');
 
   bool get _hasAurasAccess =>
       _hasAllProjectAccess || _projectName.contains('auras') || _hasManagedProject('auras');
@@ -85,7 +92,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   bool get isSurveyor => _role == 'surveyor';
 
-  bool get isAdminOrManager => _role == 'admin' || _role == 'manager';
+  bool get isAdminOrManager => _isAdmin || _isManager;
 
   bool _hasManagedProject(String needle) {
     return _manageableProjects.any((project) {
@@ -105,7 +112,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       final text = value?.toString().trim() ?? '';
       if (text.isNotEmpty) return text;
     }
-    return isSurveyor ? 'Surveyor' : 'Administrator';
+    if (isSurveyor) return 'Surveyor';
+    if (_isManager) return 'Manager';
+    return 'Administrator';
+  }
+
+  String get _dashboardTitle {
+    if (isSurveyor) return 'Survey Dashboard';
+    return _isAdmin ? 'Admin Dashboard' : 'Manager Dashboard';
+  }
+
+  String get _profileTitle {
+    if (isSurveyor) return 'Surveyor';
+    return _isAdmin ? 'Administrator' : 'Manager';
   }
 
   bool _isIhmUser(dynamic user) {
@@ -137,6 +156,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   CertificateReport? report;
   bool isLoading = true;
+  bool _isRefreshingDashboard = false;
   int _pendingCount = 0;
   int _totalUsers = 0;
   int _ihmUsersCount = 0;
@@ -152,6 +172,50 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     super.initState();
     _fetchCertificateReport();
     _fetchPendingCount();
+  }
+
+  Future<void> _refreshDashboard({bool syncOfflineData = false}) async {
+    if (_isRefreshingDashboard) return;
+    _isRefreshingDashboard = true;
+    try {
+      if (syncOfflineData) {
+        await SyncService.syncAllOfflineData();
+        await SyncService.syncFromServerToLocal();
+      }
+      await _fetchPendingCount();
+      await _fetchCertificateReport();
+    } finally {
+      _isRefreshingDashboard = false;
+    }
+  }
+
+  Future<void> _runManualSync() async {
+    final snapshot = await SyncService.syncAllOfflineData(manual: true);
+    if (!mounted) return;
+
+    if (snapshot.state == 'synced' || snapshot.state == 'failed') {
+      await _refreshDashboard();
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(snapshot.message ?? snapshot.label),
+        action: snapshot.failedCount > 0
+            ? SnackBarAction(
+                label: 'Retry',
+                onPressed: () => _runManualSync(),
+              )
+            : null,
+      ),
+    );
+  }
+
+  Future<void> _openDashboardPage(Widget page) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+    if (mounted) {
+      await _refreshDashboard();
+    }
   }
 
   Future<void> _fetchPendingCount() async {
@@ -185,15 +249,31 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
       if (isSurveyor) {
         final summary = await ApiService.fetchSurveyorDashboardSummary();
+        var dueTodayJobs = summary['dueTodayJobs'] ?? 0;
+        try {
+          final assignedIhmJobs = await ApiService.fetchSurveyJobsByType(
+            surveyType: 'IHM Survey',
+            isAdmin: false,
+            userId: userId,
+          );
+          dueTodayJobs = _countDueTodayJobs(assignedIhmJobs, userId);
+        } catch (_) {
+          dueTodayJobs = prefs.getInt('surveyorDashboardDueTodayJobs') ?? 0;
+        }
         stats = SurveyDashboardStats(
           liveJobs: summary['liveJobs'] ?? 0,
           completedJobs: summary['completedJobs'] ?? 0,
+          dueTodayJobs: dueTodayJobs,
           ihmLiveJobs: summary['liveJobs'] ?? 0,
         );
         await prefs.setInt('surveyorDashboardLiveJobs', stats.liveJobs);
         await prefs.setInt(
           'surveyorDashboardCompletedJobs',
           stats.completedJobs,
+        );
+        await prefs.setInt(
+          'surveyorDashboardDueTodayJobs',
+          stats.dueTodayJobs,
         );
       } else {
         try {
@@ -231,7 +311,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           totalSurveyJobs: summary['totalSurveyJobs'] ?? allSurveyJobs.length,
           ihmSurveyJobs: summary['ihmSurveyJobs'] ?? ihmJobs.length,
           exSurveyJobs: summary['exSurveyJobs'] ?? exJobs.length,
-          submittedJobs: summary['submittedJobs'] ?? 0,
           approvedJobs: summary['approvedJobs'] ?? 0,
           closedJobs: summary['closedJobs'] ?? 0,
           liveJobs: summary['liveJobs'] ?? 0,
@@ -334,6 +413,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       final liveJobs = prefs.getInt('surveyorDashboardLiveJobs') ?? 0;
       final completedJobs =
           prefs.getInt('surveyorDashboardCompletedJobs') ?? 0;
+      final dueTodayJobs =
+          prefs.getInt('surveyorDashboardDueTodayJobs') ?? 0;
       final cachedVessels = prefs.getInt('dashboardVesselsCount') ?? 0;
       final cachedIhmReports = prefs.getInt('dashboardIhmReportsCount') ?? 0;
       final cachedExReports =
@@ -354,6 +435,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             ? SurveyDashboardStats(
                 liveJobs: liveJobs,
                 completedJobs: completedJobs,
+                dueTodayJobs: dueTodayJobs,
               )
             : const SurveyDashboardStats();
         if (!isSurveyor) {
@@ -385,29 +467,51 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   void _openLiveSurveyJobs() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const SurveyJobListScreen(
-          surveyType: 'IHM Survey',
-          titleOverride: 'Live Jobs',
-          ihmCompletionFilter: 'live',
-        ),
+    _openDashboardPage(
+      const SurveyJobListScreen(
+        surveyType: 'IHM Survey',
+        titleOverride: 'Live Jobs',
+        ihmCompletionFilter: 'live',
       ),
     );
   }
 
   void _openCompletedSurveyJobs() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const SurveyJobListScreen(
-          surveyType: 'IHM Survey',
-          titleOverride: 'Completed Survey Jobs',
-          ihmCompletionFilter: 'completed',
-        ),
+    _openDashboardPage(
+      const SurveyJobListScreen(
+        surveyType: 'IHM Survey',
+        titleOverride: 'Completed Survey Jobs',
+        ihmCompletionFilter: 'completed',
       ),
     );
+  }
+
+  int _countDueTodayJobs(List<SurveyJob> jobs, int userId) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    return jobs.where((job) {
+      final endDate = job.endDate?.toLocal();
+      if (endDate == null) return false;
+
+      final dueDate = DateTime(endDate.year, endDate.month, endDate.day);
+      if (dueDate != today) return false;
+
+      final hasActiveAssignment = job.activeAssignments.any(
+        (assignment) => assignment.surveyorUserId == userId,
+      );
+      if (!hasActiveAssignment) return false;
+
+      return !_isSurveyJobFinished(job);
+    }).length;
+  }
+
+  bool _isSurveyJobFinished(SurveyJob job) {
+    final statusText = '${job.status} ${job.displayStatus}'.toLowerCase();
+    return statusText.contains('completed') ||
+        statusText.contains('closed') ||
+        statusText.contains('reportgenerated') ||
+        statusText.contains('report generated');
   }
 
   Widget _buildCurrentPage() {
@@ -616,12 +720,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     Icons.electrical_services,
                     Colors.deepOrange,
                   ),
-                  _buildStatCard(
-                    "Submitted",
-                    surveyStats.submittedJobs,
-                    Icons.cloud_done,
-                    Colors.cyan,
-                  ),
                 ],
               ),
 
@@ -670,21 +768,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     );
                   },
                 ),
-              if (_hasAurasAccess) ...[
-                _buildActionTile(
-                  icon: Icons.directions_boat,
-                  title: 'Vessel Master',
-                  subtitle: 'Create and manage vessel information',
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const VesselMasterScreen(),
-                      ),
-                    );
-                  },
-                ),
+              _buildActionTile(
+                icon: Icons.directions_boat,
+                title: 'Vessel Master',
+                subtitle: 'Create and manage vessel information',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const VesselMasterScreen(),
+                    ),
+                  );
+                },
+              ),
 
+              if (_hasAurasAccess) ...[
                 _buildActionTile(
                   icon: Icons.fact_check,
                   title: 'Task Manager',
@@ -728,7 +826,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final canSeeEx = _hasExSurveyAccess;
     final canSeeAuras = _hasAurasAccess;
     final canSeeUsers = _role != 'client';
-    final canSeeVessels = _role != 'client';
+    const canSeeVessels = true;
     final ihmJobs = canSeeIhm ? surveyStats.ihmSurveyJobs : 0;
     final liveIhmJobs = canSeeIhm ? surveyStats.ihmLiveJobs : 0;
     final exJobs = canSeeEx ? surveyStats.exSurveyJobs : 0;
@@ -738,16 +836,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ? _exSurveyReportsCount
               : surveyStats.exSurveyReports)
         : 0;
-    final submittedJobs = surveyStats.submittedJobs;
     final attentionJobs = liveIhmJobs;
     final vesselCount = _dashboardVessels.length;
 
     return RefreshIndicator(
       onRefresh: () async {
-        await SyncService.syncAllOfflineData();
-        await SyncService.syncFromServerToLocal();
-        await _fetchPendingCount();
-        await _fetchCertificateReport();
+        await _refreshDashboard(syncOfflineData: true);
       },
       child: Container(
         color: bg,
@@ -774,7 +868,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         icon: Icons.assignment_turned_in_rounded,
                         title: 'IHM Survey Jobs',
                         value: ihmJobs,
-                        subtitle: '$submittedJobs submitted',
+                        subtitle: 'IHM survey jobs',
                       ),
                     if (canSeeAuras)
                       _adminMetricCard(
@@ -885,15 +979,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             'View all IHM survey jobs and job details.',
                         meta: [
                           '$ihmJobs job${ihmJobs == 1 ? '' : 's'}',
-                          '$submittedJobs submitted',
                         ],
                         actionLabel: 'Open jobs',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const SurveyJobListScreen(
-                              surveyType: 'IHM Survey',
-                            ),
+                        onTap: () => _openDashboardPage(
+                          const SurveyJobListScreen(
+                            surveyType: 'IHM Survey',
                           ),
                         ),
                       ),
@@ -909,11 +999,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           '$_ihmReportsCount report${_ihmReportsCount == 1 ? '' : 's'}',
                         ],
                         actionLabel: 'Open reports',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const IhmReportsScreen(),
-                          ),
+                        onTap: () => _openDashboardPage(
+                          const IhmReportsScreen(),
                         ),
                       ),
                     if (canSeeIhm && !_isAdmin)
@@ -928,14 +1015,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           '$liveIhmJobs ongoing job${liveIhmJobs == 1 ? '' : 's'}',
                         ],
                         actionLabel: 'Open live jobs',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const SurveyJobListScreen(
-                              surveyType: 'IHM Survey',
-                              titleOverride: 'Live Jobs',
-                              ihmCompletionFilter: 'live',
-                            ),
+                        onTap: () => _openDashboardPage(
+                          const SurveyJobListScreen(
+                            surveyType: 'IHM Survey',
+                            titleOverride: 'Live Jobs',
+                            ihmCompletionFilter: 'live',
                           ),
                         ),
                       ),
@@ -959,12 +1043,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           '$exJobs job${exJobs == 1 ? '' : 's'}',
                         ],
                         actionLabel: 'Open jobs',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const SurveyJobListScreen(
-                              surveyType: 'Ex-Survey',
-                            ),
+                        onTap: () => _openDashboardPage(
+                          const SurveyJobListScreen(
+                            surveyType: 'Ex-Survey',
                           ),
                         ),
                       ),
@@ -980,12 +1061,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           '$exReportsCount report${exReportsCount == 1 ? '' : 's'}',
                         ],
                         actionLabel: 'Open reports',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                const IhmReportsScreen(initialCategory: 'exsurvey'),
-                          ),
+                        onTap: () => _openDashboardPage(
+                          const IhmReportsScreen(initialCategory: 'exsurvey'),
                         ),
                       ),
                     if (canSeeEx && !_isAdmin)
@@ -1001,14 +1078,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           '$liveExJobs ongoing job${liveExJobs == 1 ? '' : 's'}',
                         ],
                         actionLabel: 'Open live jobs',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const SurveyJobListScreen(
-                              surveyType: 'Ex-Survey',
-                              titleOverride: 'EX-Survey Live Jobs',
-                              jobCompletionFilter: 'live',
-                            ),
+                        onTap: () => _openDashboardPage(
+                          const SurveyJobListScreen(
+                            surveyType: 'Ex-Survey',
+                            titleOverride: 'EX-Survey Live Jobs',
+                            jobCompletionFilter: 'live',
                           ),
                         ),
                       ),
@@ -1098,8 +1172,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Widget _buildAurasTopProfile() {
     final email = widget.user['email']?.toString() ?? '';
-    final profileTitle = _isAdmin ? 'Administrator' : 'Manager';
-    final dashboardTitle = _isAdmin ? 'Admin Dashboard' : 'Manager Dashboard';
     final initial = (_displayName.isNotEmpty ? _displayName[0] : 'A')
         .toUpperCase();
 
@@ -1128,7 +1200,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
               ),
               Text(
-                dashboardTitle,
+                _dashboardTitle,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: Color(0xFF6F7C77),
@@ -1166,7 +1238,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                profileTitle,
+                _profileTitle,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: Color(0xFF06120F),
@@ -1517,14 +1589,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 Expanded(
                   child: _liveJobsActionButton(
                     label: 'Open IHM',
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const SurveyJobListScreen(
-                          surveyType: 'IHM Survey',
-                          titleOverride: 'IHM Live Jobs',
-                          ihmCompletionFilter: 'live',
-                        ),
+                    onPressed: () => _openDashboardPage(
+                      const SurveyJobListScreen(
+                        surveyType: 'IHM Survey',
+                        titleOverride: 'IHM Live Jobs',
+                        ihmCompletionFilter: 'live',
                       ),
                     ),
                   ),
@@ -1534,14 +1603,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 Expanded(
                   child: _liveJobsActionButton(
                     label: 'Open EX',
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const SurveyJobListScreen(
-                          surveyType: 'Ex-Survey',
-                          titleOverride: 'EX-Survey Live Jobs',
-                          jobCompletionFilter: 'live',
-                        ),
+                    onPressed: () => _openDashboardPage(
+                      const SurveyJobListScreen(
+                        surveyType: 'Ex-Survey',
+                        titleOverride: 'EX-Survey Live Jobs',
+                        jobCompletionFilter: 'live',
                       ),
                     ),
                   ),
@@ -1632,9 +1698,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return _adminPanel(
       title: 'Vessel Master',
       actionLabel: 'All vessels',
-      onAction: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const VesselMasterScreen()),
+      onAction: () => _openDashboardPage(
+        const VesselMasterScreen(),
       ),
       child: vessels.isEmpty
           ? _adminEmptyState(Icons.directions_boat_rounded, 'No vessels available')
@@ -1893,6 +1958,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget _buildSurveyorDashboard(bool isDark) {
     final liveJobs = surveyStats.liveJobs;
     final completedJobs = surveyStats.completedJobs;
+    final dueTodayJobs = surveyStats.dueTodayJobs;
     final totalAssigned = liveJobs + completedJobs;
     final successRate = totalAssigned == 0
         ? 0
@@ -1910,7 +1976,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildCommandHeader(isDark),
+            _buildSurveyorWelcomeHeader(isDark),
             const SizedBox(height: 18),
             LayoutBuilder(
               builder: (context, constraints) {
@@ -1954,52 +2020,57 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             const SizedBox(height: 24),
             _dashboardSectionTitle("Today's Overview"),
             const SizedBox(height: 12),
-            GridView.count(
-              crossAxisCount: MediaQuery.of(context).size.width < 720 ? 2 : 4,
-              childAspectRatio: MediaQuery.of(context).size.width < 420
-                  ? 1.05
-                  : 1.35,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                _buildSmallKpiCard(
-                  icon: Icons.assignment_turned_in,
-                  count: completedJobs,
-                  title: 'Surveys Done',
-                  subtitle: 'Completed Today',
-                  color: const Color(0xFF2563EB),
-                ),
-                _buildSmallKpiCard(
-                  icon: Icons.schedule,
-                  count: liveJobs,
-                  title: 'Pending Jobs',
-                  subtitle: 'Waiting to Start',
-                  color: const Color(0xFFF59E0B),
-                ),
-                _buildSmallKpiCard(
-                  icon: Icons.warning_amber,
-                  count: 0,
-                  title: 'Incomplete Jobs',
-                  subtitle: 'Needs Attention',
-                  color: const Color(0xFFDC2626),
-                ),
-                _buildSmallKpiCard(
-                  icon: Icons.today,
-                  count: 0,
-                  title: 'Due Today',
-                  subtitle: 'Deadline Today',
-                  color: const Color(0xFF7C3AED),
-                ),
-              ],
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final width = constraints.maxWidth;
+                final crossAxisCount = width >= 720
+                    ? 3
+                    : width >= 430
+                    ? 2
+                    : 1;
+                final cards = [
+                  _buildSmallKpiCard(
+                    icon: Icons.assignment_turned_in,
+                    count: completedJobs,
+                    title: 'Surveys Done',
+                    subtitle: 'Completed jobs',
+                    color: const Color(0xFF2563EB),
+                  ),
+                  _buildSmallKpiCard(
+                    icon: Icons.schedule,
+                    count: liveJobs,
+                    title: 'Pending Jobs',
+                    subtitle: 'Assigned unfinished jobs',
+                    color: const Color(0xFFF59E0B),
+                  ),
+                  _buildSmallKpiCard(
+                    icon: Icons.today,
+                    count: dueTodayJobs,
+                    title: 'Due Today',
+                    subtitle: 'End date is today',
+                    color: const Color(0xFF7C3AED),
+                  ),
+                ];
+
+                return GridView.builder(
+                  itemCount: cards.length,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: crossAxisCount,
+                    mainAxisExtent: 148,
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                  ),
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemBuilder: (context, index) => cards[index],
+                );
+              },
             ),
             const SizedBox(height: 24),
             _dashboardSectionTitle('Performance'),
             const SizedBox(height: 12),
             LayoutBuilder(
               builder: (context, constraints) {
-                final stackCards = constraints.maxWidth < 760;
                 final cards = [
                   _buildPerformanceCard(
                     title: 'Total Assigned',
@@ -2007,13 +2078,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     subtitle: 'Live + completed jobs',
                     icon: Icons.work_rounded,
                     color: const Color(0xFF2563EB),
-                  ),
-                  _buildPerformanceCard(
-                    title: 'Average Completion Time',
-                    value: 'N/A',
-                    subtitle: 'Awaiting duration data',
-                    icon: Icons.timer_rounded,
-                    color: const Color(0xFF16A34A),
                   ),
                   _buildPerformanceCard(
                     title: 'Success Rate',
@@ -2024,7 +2088,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   ),
                 ];
 
-                if (stackCards) {
+                if (constraints.maxWidth < 620) {
                   return Column(
                     children: cards
                         .map(
@@ -2038,27 +2102,30 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 }
 
                 return Row(
-                  children: cards
-                      .map(
-                        (card) => Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.only(right: 12),
-                            child: card,
-                          ),
-                        ),
-                      )
-                      .toList(),
+                  children: [
+                    Expanded(child: cards[0]),
+                    const SizedBox(width: 12),
+                    Expanded(child: cards[1]),
+                  ],
                 );
               },
             ),
             const SizedBox(height: 24),
-            _dashboardSectionTitle('Recent Activity'),
+            _dashboardSectionTitle('Quick Actions'),
             const SizedBox(height: 12),
-            _buildRecentActivityCard(liveJobs, completedJobs),
-            const SizedBox(height: 24),
-            _dashboardSectionTitle('Upcoming Surveys'),
-            const SizedBox(height: 12),
-            _buildUpcomingSurveyCard(liveJobs),
+            _buildActionTile(
+              icon: Icons.directions_boat,
+              title: 'Vessel Master',
+              subtitle: 'Open vessel registry',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const VesselMasterScreen(),
+                  ),
+                );
+              },
+            ),
           ],
         ),
       ),
@@ -2182,50 +2249,55 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         borderRadius: BorderRadius.circular(16),
         onTap: () {},
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: MainAxisAlignment.start,
             children: [
               Container(
-                width: 42,
-                height: 42,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
                   color: color.withOpacity(0.12),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(icon, color: color, size: 22),
               ),
+              const SizedBox(height: 10),
               Text(
                 '$count',
                 style: const TextStyle(
                   color: Color(0xFF0F172A),
-                  fontSize: 25,
+                  fontSize: 24,
                   fontWeight: FontWeight.w900,
+                  height: 1,
                 ),
               ),
+              const SizedBox(height: 10),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     title,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Color(0xFF0F172A),
                       fontSize: 12.5,
                       fontWeight: FontWeight.w900,
+                      height: 1.15,
                     ),
                   ),
                   const SizedBox(height: 3),
                   Text(
                     subtitle,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Color(0xFF64748B),
                       fontSize: 10.5,
                       fontWeight: FontWeight.w600,
+                      height: 1.18,
                     ),
                   ),
                 ],
@@ -2310,175 +2382,68 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildRecentActivityCard(int liveJobs, int completedJobs) {
-    final rows = <Widget>[
-      if (completedJobs > 0)
-        _activityRow(
-          Icons.check_circle_rounded,
-          'IHM completed survey jobs',
-          'Completed',
-          '$completedJobs jobs',
-          const Color(0xFF16A34A),
-        ),
-      if (liveJobs > 0)
-        _activityRow(
-          Icons.hourglass_top_rounded,
-          'IHM live survey jobs',
-          'Started',
-          '$liveJobs jobs active',
-          const Color(0xFFF59E0B),
-        ),
-    ];
+  Widget _buildSurveyorWelcomeHeader(bool isDark) {
+    final userName = _displayName;
 
-    return _roundedPanel(
-      child: rows.isEmpty
-          ? _emptyPanelText('No recent activity available yet.')
-          : Column(children: rows.take(5).toList()),
-    );
-  }
-
-  Widget _buildUpcomingSurveyCard(int liveJobs) {
-    return _roundedPanel(
-      child: liveJobs <= 0
-          ? _emptyPanelText('No upcoming surveys available.')
-          : Column(
-              children: [
-                _upcomingRow('IHM Live Job Queue', 'Open live jobs'),
-                _upcomingRow('Assigned Survey Work', 'In progress'),
-              ],
-            ),
-    );
-  }
-
-  Widget _roundedPanel({required Widget child}) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      constraints: const BoxConstraints(minHeight: 142),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        gradient: LinearGradient(
+          colors: isDark
+              ? const [Color(0xFF15385E), Color(0xFF09182D)]
+              : const [Color(0xFF174B82), Color(0xFF2875BA)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
+            color: const Color(0xFF174B82).withOpacity(0.35),
+            blurRadius: 28,
+            offset: const Offset(0, 14),
           ),
         ],
       ),
-      child: child,
-    );
-  }
-
-  Widget _emptyPanelText(String text) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: Color(0xFF64748B),
-          fontWeight: FontWeight.w700,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: Stack(
+          children: [
+            Positioned(right: -48, top: -58, child: _buildDepthCircle(180)),
+            Positioned(right: 95, bottom: -76, child: _buildDepthCircle(135)),
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Welcome',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.72),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      userName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 27,
+                        fontWeight: FontWeight.w900,
+                        height: 1.08,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
-      ),
-    );
-  }
-
-  Widget _activityRow(
-    IconData icon,
-    String name,
-    String status,
-    String time,
-    Color color,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 9),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 22),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: const TextStyle(
-                    color: Color(0xFF0F172A),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  time,
-                  style: const TextStyle(
-                    color: Color(0xFF64748B),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              status,
-              style: TextStyle(
-                color: color,
-                fontSize: 10,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _upcomingRow(String vesselName, String dateText) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: const Color(0xFF2563EB).withOpacity(0.10),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.directions_boat_filled_rounded,
-              color: Color(0xFF2563EB),
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              vesselName,
-              style: const TextStyle(
-                color: Color(0xFF0F172A),
-                fontSize: 13,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-          Text(
-            dateText,
-            style: const TextStyle(
-              color: Color(0xFF64748B),
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(width: 4),
-          const Icon(Icons.chevron_right_rounded, color: Color(0xFF94A3B8)),
-        ],
       ),
     );
   }
@@ -3156,6 +3121,148 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
+  Widget _buildAppBarSyncButton(SyncSnapshot snapshot) {
+    final label = snapshot.pendingCount > 0 && !snapshot.isSyncing
+        ? '${snapshot.label} (${snapshot.pendingCount})'
+        : snapshot.label;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: TextButton.icon(
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.white,
+          disabledForegroundColor: Colors.white70,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          minimumSize: const Size(0, 40),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        onPressed: snapshot.isSyncing ? null : _runManualSync,
+        onLongPress: () => _showSyncDetails(snapshot),
+        icon: snapshot.isSyncing
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              )
+            : Icon(_syncIcon(snapshot), size: 19),
+        label: Text(
+          label,
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+        ),
+      ),
+    );
+  }
+
+  IconData _syncIcon(SyncSnapshot snapshot) {
+    if (snapshot.state == 'offline') return Icons.cloud_off_rounded;
+    if (snapshot.state == 'failed') return Icons.sync_problem_rounded;
+    if (snapshot.state == 'synced') return Icons.cloud_done_rounded;
+    return Icons.sync_rounded;
+  }
+
+  void _showSyncDetails(SyncSnapshot snapshot) {
+    final lastSynced = snapshot.lastSyncedAt == null
+        ? 'Never'
+        : _formatSyncDateTime(snapshot.lastSyncedAt!);
+
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Sync Status',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                const SizedBox(height: 12),
+                _syncDetailRow('Status', snapshot.label),
+                _syncDetailRow('Last synced', lastSynced),
+                _syncDetailRow(
+                  'Pending items',
+                  snapshot.pendingCount.toString(),
+                ),
+                _syncDetailRow('Failed items', snapshot.failedCount.toString()),
+                _syncDetailRow(
+                  'Downloaded jobs',
+                  snapshot.downloadedJobCount.toString(),
+                ),
+                _syncDetailRow(
+                  'Uploaded items',
+                  snapshot.uploadedItemCount.toString(),
+                ),
+                if ((snapshot.message ?? '').isNotEmpty)
+                  _syncDetailRow('Message', snapshot.message!),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: snapshot.isSyncing
+                            ? null
+                            : () {
+                                Navigator.pop(context);
+                                _runManualSync();
+                              },
+                        icon: const Icon(Icons.sync_rounded),
+                        label: Text(
+                          snapshot.failedCount > 0 ? 'Retry' : 'Sync now',
+                        ),
+                      ),
+                    ),
+                    if (snapshot.isSyncing) ...[
+                      const SizedBox(width: 10),
+                      OutlinedButton(
+                        onPressed: SyncService.requestCancel,
+                        child: const Text('Cancel'),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _syncDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 120,
+            child: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+          Expanded(child: Text(value)),
+        ],
+      ),
+    );
+  }
+
+  String _formatSyncDateTime(DateTime value) {
+    final local = value.toLocal();
+    String two(int number) => number.toString().padLeft(2, '0');
+    return '${two(local.day)}/${two(local.month)}/${local.year} '
+        '${two(local.hour)}:${two(local.minute)}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final themeNotifier = context.watch<ThemeNotifier>();
@@ -3167,7 +3274,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       appBar: AppBar(
         toolbarHeight: 68,
         title: Text(
-          isSurveyor ? "Survey Dashboard" : "Admin Dashboard",
+          _dashboardTitle,
           style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
         ),
         backgroundColor: Colors.transparent,
@@ -3194,6 +3301,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ),
         ),
         actions: [
+          ValueListenableBuilder<SyncSnapshot>(
+            valueListenable: SyncService.syncStatus,
+            builder: (context, snapshot, _) {
+              return _buildAppBarSyncButton(snapshot);
+            },
+          ),
           IconButton(
             tooltip: themeNotifier.isDarkMode ? 'Light mode' : 'Dark mode',
             icon: Icon(
@@ -3250,8 +3363,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.clear();
+              try {
+                await SyncService.logoutAndClearUserData();
+              } catch (error) {
+                debugPrint('Logout failed during cleanup: $error');
+              }
               if (!context.mounted) return;
               Navigator.pushNamedAndRemoveUntil(
                 context,

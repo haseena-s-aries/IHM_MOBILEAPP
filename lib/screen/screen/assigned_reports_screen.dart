@@ -2,11 +2,12 @@ import 'dart:io';
 
 import 'package:Auras/model/assigned_report.dart';
 import 'package:Auras/screen/screen/login_screen.dart';
+import 'package:Auras/screen/screen/vessel_master_screen.dart';
 import 'package:Auras/service/api_service.dart';
+import 'package:Auras/service/sync_service.dart';
 import 'package:flutter/material.dart';
 import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class AssignedReportsScreen extends StatefulWidget {
   final Map<String, dynamic> user;
@@ -19,11 +20,19 @@ class AssignedReportsScreen extends StatefulWidget {
 
 class _AssignedReportsScreenState extends State<AssignedReportsScreen> {
   late Future<List<AssignedReport>> _future;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchTerm = '';
 
   @override
   void initState() {
     super.initState();
     _future = ApiService.fetchMyAssignedReports();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _refresh() async {
@@ -48,8 +57,11 @@ class _AssignedReportsScreenState extends State<AssignedReportsScreen> {
   }
 
   Future<void> _logout() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.clear();
+    try {
+      await SyncService.logoutAndClearUserData();
+    } catch (error) {
+      debugPrint('Logout failed during cleanup: $error');
+    }
     if (!mounted) return;
     Navigator.pushAndRemoveUntil(
       context,
@@ -66,6 +78,18 @@ class _AssignedReportsScreenState extends State<AssignedReportsScreen> {
       appBar: AppBar(
         title: const Text('Assigned Reports'),
         actions: [
+          IconButton(
+            tooltip: 'Vessel Master',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const VesselMasterScreen(),
+                ),
+              );
+            },
+            icon: const Icon(Icons.directions_boat),
+          ),
           IconButton(
             tooltip: 'Logout',
             onPressed: _logout,
@@ -103,6 +127,7 @@ class _AssignedReportsScreenState extends State<AssignedReportsScreen> {
             }
 
             final reports = snapshot.data ?? const <AssignedReport>[];
+            final filteredReports = reports.where(_matchesSearch).toList();
             if (reports.isEmpty) {
               return ListView(
                 padding: const EdgeInsets.all(24),
@@ -121,24 +146,26 @@ class _AssignedReportsScreenState extends State<AssignedReportsScreen> {
               );
             }
 
-            final ihmReports = reports
-                .where((x) => x.reportType.toLowerCase() == 'ihm')
-                .toList();
-            final exReports = reports
-                .where((x) => x.reportType.toLowerCase() == 'exsurvey')
-                .toList();
-
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                if (ihmReports.isNotEmpty) ...[
-                  _sectionTitle('IHM Reports'),
-                  ...ihmReports.map(_reportCard),
-                ],
-                if (exReports.isNotEmpty) ...[
-                  const SizedBox(height: 18),
-                  _sectionTitle('EX-Survey Reports'),
-                  ...exReports.map(_reportCard),
+                _searchBox(),
+                const SizedBox(height: 14),
+                if (filteredReports.isEmpty) ...[
+                  const SizedBox(height: 60),
+                  const Icon(
+                    Icons.search_off_rounded,
+                    size: 54,
+                    color: Colors.blueGrey,
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'No assigned reports match your search.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ] else ...[
+                  ...filteredReports.map(_reportCard),
                 ],
               ],
             );
@@ -148,12 +175,45 @@ class _AssignedReportsScreenState extends State<AssignedReportsScreen> {
     );
   }
 
-  Widget _sectionTitle(String title) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(
-          title,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+  bool _matchesSearch(AssignedReport report) {
+    final term = _searchTerm.trim().toLowerCase();
+    if (term.isEmpty) return true;
+
+    final haystack = [
+      report.vesselName,
+      report.title,
+      report.reference,
+      report.label,
+      report.createdBy,
+      if (report.assignedAt != null)
+        '${report.assignedAt!.day.toString().padLeft(2, '0')}-'
+            '${report.assignedAt!.month.toString().padLeft(2, '0')}-'
+            '${report.assignedAt!.year}',
+    ].join(' ').toLowerCase();
+
+    return haystack.contains(term);
+  }
+
+  Widget _searchBox() => TextField(
+        controller: _searchController,
+        decoration: InputDecoration(
+          hintText: 'Search vessel, job, report type, created by or date...',
+          prefixIcon: const Icon(Icons.search),
+          suffixIcon: _searchTerm.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: 'Clear search',
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() => _searchTerm = '');
+                  },
+                  icon: const Icon(Icons.close),
+                ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
         ),
+        onChanged: (value) => setState(() => _searchTerm = value),
       );
 
   Widget _reportCard(AssignedReport report) {
@@ -175,8 +235,6 @@ class _AssignedReportsScreenState extends State<AssignedReportsScreen> {
             Row(
               children: [
                 Chip(label: Text(report.label)),
-                const Spacer(),
-                Text(report.status, style: const TextStyle(fontWeight: FontWeight.w700)),
               ],
             ),
             const SizedBox(height: 10),

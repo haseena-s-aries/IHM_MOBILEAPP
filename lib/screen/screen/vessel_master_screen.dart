@@ -2,6 +2,7 @@
 import 'package:Auras/service/api_service.dart';
 import 'package:Auras/utils/app_dialog.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // â”€â”€â”€ Color Palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _AppColors {
@@ -31,14 +32,21 @@ class VesselMasterScreen extends StatefulWidget {
 
 class _VesselMasterScreenState extends State<VesselMasterScreen> {
   bool isLoading = true;
+  bool _isRefreshingVessels = false;
   String? errorMessage;
   List<Vessel> vessels = [];
   String _searchQuery = '';
+  String _role = '';
   final TextEditingController _searchController = TextEditingController();
+
+  bool get _isClient => _role == 'client';
+
+  bool get _canCreateVessels => _role == 'admin' || _role == 'manager';
 
   @override
   void initState() {
     super.initState();
+    _loadCurrentRole();
     _loadVessels();
   }
 
@@ -48,23 +56,45 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
     super.dispose();
   }
 
-  Future<void> _loadVessels() async {
+  Future<void> _loadCurrentRole() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+
     setState(() {
-      isLoading = true;
-      errorMessage = null;
+      _role = (prefs.getString('userRole') ?? '').trim().toLowerCase();
     });
+  }
+
+  Future<void> _loadVessels({bool showLoading = true}) async {
+    if (_isRefreshingVessels) return;
+    _isRefreshingVessels = true;
+
+    if (showLoading && mounted) {
+      setState(() {
+        isLoading = true;
+        errorMessage = null;
+      });
+    } else if (mounted) {
+      setState(() => errorMessage = null);
+    }
 
     try {
       final result = await ApiService.fetchVessels();
+      if (!mounted) return;
       setState(() {
         vessels = result;
         isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
-        errorMessage = e.toString();
+        if (showLoading || vessels.isEmpty) {
+          errorMessage = e.toString();
+        }
         isLoading = false;
       });
+    } finally {
+      _isRefreshingVessels = false;
     }
   }
 
@@ -81,27 +111,53 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
   }
 
   // â”€â”€â”€ Create Dialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  Future<void> _showCreateDialog() async {
-    final vesselName = TextEditingController();
-    final vesselType = TextEditingController();
-    final classSociety = TextEditingController();
-    final callSign = TextEditingController();
-    final imo = TextEditingController();
-    final officialNumber = TextEditingController();
-    final builderName = TextEditingController();
-    final dateOfBuild = TextEditingController();
-    final portOfRegistry = TextEditingController();
-    final flag = TextEditingController();
-    final loa = TextEditingController();
-    final lbp = TextEditingController();
-    final breadthMld = TextEditingController();
-    final depthMld = TextEditingController();
-    final draughtMld = TextEditingController();
-    final grt = TextEditingController();
-    final nrt = TextEditingController();
-    final owner = TextEditingController();
-    final manager = TextEditingController();
-    final client = TextEditingController();
+  Future<void> _showCreateDialog() => _showVesselFormDialog();
+
+  Future<void> _showEditDialog(Vessel vessel) {
+    if (!vessel.canEdit) return Future.value();
+    return _showVesselFormDialog(vessel: vessel);
+  }
+
+  Future<void> _showVesselFormDialog({Vessel? vessel}) async {
+    final isEditing = vessel != null;
+    final vesselName = TextEditingController(text: vessel?.vesselName ?? '');
+    final vesselType = TextEditingController(text: vessel?.vesselType ?? '');
+    final classSociety = TextEditingController(text: vessel?.classSociety ?? '');
+    final callSign = TextEditingController(text: vessel?.callSign ?? '');
+    final imo = TextEditingController(text: vessel?.imoNumber ?? '');
+    final officialNumber = TextEditingController(
+      text: vessel?.officialNumber ?? '',
+    );
+    final builderName = TextEditingController(text: vessel?.builder ?? '');
+    final dateOfBuild = TextEditingController(
+      text: vessel?.dateOfBuild == null
+          ? ''
+          : _displayDateValue(vessel?.dateOfBuild),
+    );
+    final portOfRegistry = TextEditingController(
+      text: vessel?.portOfRegistry ?? '',
+    );
+    final flag = TextEditingController(text: vessel?.flag ?? '');
+    final loa = TextEditingController(
+      text: _numberInput(vessel?.lengthOverall),
+    );
+    final lbp = TextEditingController(
+      text: _numberInput(vessel?.lengthBetweenPerpendiculars),
+    );
+    final breadthMld = TextEditingController(
+      text: _numberInput(vessel?.breadth),
+    );
+    final depthMld = TextEditingController(text: _numberInput(vessel?.depth));
+    final draughtMld = TextEditingController(
+      text: _numberInput(vessel?.draughtMoulded),
+    );
+    final grt = TextEditingController(
+      text: _numberInput(vessel?.grossTonnage),
+    );
+    final nrt = TextEditingController(text: _numberInput(vessel?.netTonnage));
+    final owner = TextEditingController(text: vessel?.ownerName ?? '');
+    final manager = TextEditingController(text: vessel?.managerName ?? '');
+    final client = TextEditingController(text: vessel?.clientName ?? '');
 
     final created = await showDialog<bool>(
       context: context,
@@ -145,9 +201,9 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
                         ),
                       ),
                       const SizedBox(width: 14),
-                      const Text(
-                        'Register New Vessel',
-                        style: TextStyle(
+                      Text(
+                        isEditing ? 'Edit Vessel' : 'Register New Vessel',
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
@@ -261,7 +317,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
                       const SizedBox(width: 12),
                       ElevatedButton.icon(
                         icon: const Icon(Icons.check, size: 18),
-                        label: const Text('Save Vessel'),
+                        label: Text(isEditing ? 'Update Vessel' : 'Save Vessel'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _AppColors.ocean,
                           foregroundColor: Colors.white,
@@ -288,36 +344,69 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
                             context,
                             loadingMessage: 'Saving vessel...',
                             action: () async {
-                              await ApiService.createVessel(
-                                vesselName: vesselName.text.trim(),
-                                vesselType: vesselType.text.trim(),
-                                classSociety: classSociety.text.trim(),
-                                callSign: callSign.text.trim(),
-                                imoNumber: imo.text.trim(),
-                                officialNumber: officialNumber.text.trim(),
-                                builder: builderName.text.trim(),
-                                dateOfBuild: _dateDisplayToApi(
+                              final payload = {
+                                'vesselName': vesselName.text.trim(),
+                                'vesselType': vesselType.text.trim(),
+                                'classSociety': classSociety.text.trim(),
+                                'callSign': callSign.text.trim(),
+                                'imoNumber': imo.text.trim(),
+                                'officialNumber': officialNumber.text.trim(),
+                                'builder': builderName.text.trim(),
+                                'dateOfBuild': _dateDisplayToApi(
                                   dateOfBuild.text,
                                 ),
-                                portOfRegistry: portOfRegistry.text.trim(),
-                                flag: flag.text.trim(),
-                                lengthOverall: _toDouble(loa.text),
-                                lengthBetweenPerpendiculars:
+                                'portOfRegistry': portOfRegistry.text.trim(),
+                                'flag': flag.text.trim(),
+                                'lengthOverall': _toDouble(loa.text),
+                                'lengthBetweenPerpendiculars':
                                     _toDouble(lbp.text),
-                                breadth: _toDouble(breadthMld.text),
-                                depth: _toDouble(depthMld.text),
-                                draughtMoulded: _toDouble(draughtMld.text),
-                                grossTonnage: _toDouble(grt.text),
-                                netTonnage: _toDouble(nrt.text),
-                                ownerName: owner.text.trim(),
-                                managerName: manager.text.trim(),
-                                clientName: client.text.trim(),
-                              );
+                                'breadth': _toDouble(breadthMld.text),
+                                'depth': _toDouble(depthMld.text),
+                                'draughtMoulded': _toDouble(draughtMld.text),
+                                'grossTonnage': _toDouble(grt.text),
+                                'netTonnage': _toDouble(nrt.text),
+                                'ownerName': owner.text.trim(),
+                                'managerName': manager.text.trim(),
+                                'clientName': client.text.trim(),
+                              };
+                              if (isEditing) {
+                                await ApiService.updateVessel(
+                                  vesselId: vessel!.id,
+                                  data: payload,
+                                );
+                              } else {
+                                await ApiService.createVessel(
+                                  vesselName: vesselName.text.trim(),
+                                  vesselType: vesselType.text.trim(),
+                                  classSociety: classSociety.text.trim(),
+                                  callSign: callSign.text.trim(),
+                                  imoNumber: imo.text.trim(),
+                                  officialNumber: officialNumber.text.trim(),
+                                  builder: builderName.text.trim(),
+                                  dateOfBuild: _dateDisplayToApi(
+                                    dateOfBuild.text,
+                                  ),
+                                  portOfRegistry: portOfRegistry.text.trim(),
+                                  flag: flag.text.trim(),
+                                  lengthOverall: _toDouble(loa.text),
+                                  lengthBetweenPerpendiculars:
+                                      _toDouble(lbp.text),
+                                  breadth: _toDouble(breadthMld.text),
+                                  depth: _toDouble(depthMld.text),
+                                  draughtMoulded: _toDouble(draughtMld.text),
+                                  grossTonnage: _toDouble(grt.text),
+                                  netTonnage: _toDouble(nrt.text),
+                                  ownerName: owner.text.trim(),
+                                  managerName: manager.text.trim(),
+                                  clientName: client.text.trim(),
+                                );
+                              }
                               return true;
                             },
-                            successTitle: 'Vessel saved',
+                            successTitle:
+                                isEditing ? 'Vessel updated' : 'Vessel saved',
                             successMessage:
-                                '${vesselName.text.trim()} was created successfully.',
+                                '${vesselName.text.trim()} was ${isEditing ? 'updated' : 'created'} successfully.',
                             errorTitle: 'Unable to save vessel',
                           );
                           if (saved == true && context.mounted) {
@@ -335,7 +424,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
       },
     );
 
-    if (created == true) _loadVessels();
+    if (created == true) _loadVessels(showLoading: false);
   }
 
   // â”€â”€â”€ Dialog Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -493,6 +582,13 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
     return double.tryParse(value.trim());
   }
 
+  String _numberInput(double? value) {
+    if (value == null) return '';
+    return value % 1 == 0
+        ? value.toStringAsFixed(0)
+        : value.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '');
+  }
+
   Future<void> _deleteVessel(Vessel vessel) async {
     final confirmed = await AppDialog.confirm(
       context,
@@ -516,7 +612,7 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
       errorTitle: 'Unable to delete vessel',
     );
     if (deleted == true && mounted) {
-      await _loadVessels();
+      await _loadVessels(showLoading: false);
     }
   }
 
@@ -732,8 +828,10 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
                 ),
               const Spacer(),
               _headerButton(Icons.refresh, 'Refresh', _loadVessels),
-              const SizedBox(width: 8),
-              _addVesselButton(),
+              if (_canCreateVessels) ...[
+                const SizedBox(width: 8),
+                _addVesselButton(),
+              ],
             ],
           ),
 
@@ -922,7 +1020,9 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
             Text(
               _searchQuery.isNotEmpty
                   ? 'Try a different keyword'
-                  : 'Tap "Add Vessel" to register your first vessel',
+                  : _canCreateVessels
+                  ? 'Tap "Add Vessel" to register your first vessel'
+                  : 'No vessels are available yet',
               style: const TextStyle(color: _AppColors.textMuted, fontSize: 13),
             ),
           ],
@@ -1117,15 +1217,26 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
                         onTap: () => _showVesselDetail(vessel),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _cardActionButton(
-                        icon: Icons.delete_outline,
-                        label: 'Delete',
-                        color: _AppColors.red,
-                        onTap: () => _deleteVessel(vessel),
+                    if (vessel.canEdit) ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _cardActionButton(
+                          icon: Icons.edit_outlined,
+                          label: 'Edit',
+                          color: _AppColors.amber,
+                          onTap: () => _showEditDialog(vessel),
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _cardActionButton(
+                          icon: Icons.delete_outline,
+                          label: 'Delete',
+                          color: _AppColors.red,
+                          onTap: () => _deleteVessel(vessel),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ],
@@ -1373,25 +1484,47 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
                     _detailItem('Manager', _val(vessel.managerName)),
                     _detailItem('Client', _val(vessel.clientName)),
                   ]),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 46,
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.delete_outline, size: 18),
-                      label: const Text('Delete Vessel'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _AppColors.red,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                  if (vessel.canEdit) ...[
+                    SizedBox(
+                      width: double.infinity,
+                      height: 46,
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.edit_outlined, size: 18),
+                        label: const Text('Edit Vessel'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _AppColors.ocean,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                         ),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _showEditDialog(vessel);
+                        },
                       ),
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _deleteVessel(vessel);
-                      },
                     ),
-                  ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 46,
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.delete_outline, size: 18),
+                        label: const Text('Delete Vessel'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _AppColors.red,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _deleteVessel(vessel);
+                        },
+                      ),
+                    ),
+                  ],
                 ],
               ),
             );

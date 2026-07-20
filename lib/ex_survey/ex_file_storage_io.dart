@@ -30,3 +30,13 @@ Future<String> writeExLocalFile(
 Future<Uint8List> readExLocalFile(String path) async {
   return File(path).readAsBytes();
 }
+
+Future<void> clearExLocalFiles() async {
+  final directory = await getApplicationDocumentsDirectory();
+  for (final folderName in ['ex_survey_files']) {
+    final target = Directory(p.join(directory.path, folderName));
+    if (await target.exists()) {
+      await target.delete(recursive: true);
+    }
+  }
+}

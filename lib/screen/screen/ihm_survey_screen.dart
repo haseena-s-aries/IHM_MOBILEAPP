@@ -4,6 +4,7 @@ import 'package:Auras/ihm_areas_screen.dart';
 import 'package:Auras/ihm_project_info_screen.dart';
 import 'package:Auras/model/survey_job.dart';
 import 'package:Auras/service/IhmOfflineService.dart';
+import 'package:Auras/service/api_service.dart';
 
 import 'package:Auras/vessel_info_screen.dart';
 import 'package:flutter/material.dart';
@@ -287,8 +288,17 @@ class _IHMSurveyScreenState extends State<IHMSurveyScreen>
     );
   }
 
-  void _openVesselInfo() {
-    final vesselId = widget.job.vesselId;
+  Future<void> _openVesselInfo() async {
+    var vesselId = widget.job.vesselId;
+
+    if (vesselId == null || vesselId <= 0) {
+      try {
+        final refreshedJob = await ApiService.fetchSurveyJobById(widget.job.id);
+        vesselId = refreshedJob.vesselId;
+      } catch (_) {
+        vesselId = null;
+      }
+    }
 
     if (vesselId == null || vesselId <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -297,11 +307,14 @@ class _IHMSurveyScreenState extends State<IHMSurveyScreen>
       return;
     }
 
+    final resolvedVesselId =
+        vesselId; // now a non-nullable, non-reassignable int
+
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => VesselInfoScreen(
-          vesselId: vesselId,
+          vesselId: resolvedVesselId,
           jobNumber: widget.job.jobNumber,
         ),
       ),
@@ -327,14 +340,6 @@ class _IHMSurveyScreenState extends State<IHMSurveyScreen>
         children: [
           Text(
             '${widget.job.jobNumber} | ${widget.job.vesselName ?? "-"}',
-            style: TextStyle(
-              color: _c.textSecond,
-              fontSize: 11,
-              fontWeight: FontWeight.w400,
-            ),
-          ),
-          Text(
-            "UNDER DEVELOPEMENT",
             style: TextStyle(
               color: _c.textSecond,
               fontSize: 11,
