@@ -37,6 +37,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Timer? _notificationTimer;
   StreamSubscription<ConnectivityResult>? _connectivitySubscription;
   bool _notificationsLoaded = false;
+  bool _isLoggingOut = false;
 
   String get _projectName =>
       widget.user['projectName']?.toString().trim().toLowerCase() ?? '';
@@ -437,6 +438,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       },
     );
+  }
+
+  Future<void> _logout() async {
+    if (_isLoggingOut) return;
+    setState(() => _isLoggingOut = true);
+
+    try {
+      await SyncService.logoutAndClearUserData();
+    } catch (error) {
+      debugPrint('Logout failed during cleanup: $error');
+    }
+
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
   String _notificationTime(DateTime value) {
@@ -1194,21 +1209,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onPressed: themeNotifier.toggleTheme,
           ),
           IconButton(
-            icon: const Icon(Icons.logout),
+            icon: _isLoggingOut
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.logout),
             tooltip: 'Logout',
-            onPressed: () async {
-              try {
-                await SyncService.logoutAndClearUserData();
-              } catch (error) {
-                debugPrint('Logout failed during cleanup: $error');
-              }
-              if (!context.mounted) return;
-              Navigator.pushNamedAndRemoveUntil(
-                context,
-                '/login',
-                (route) => false,
-              );
-            },
+            onPressed: _isLoggingOut ? null : _logout,
           ),
         ],
       ),

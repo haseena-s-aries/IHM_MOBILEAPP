@@ -1,6 +1,7 @@
 class AssignedReport {
   final int assignmentId;
   final int reportId;
+  final int? surveyJobId;
   final String reportType;
   final String title;
   final String vesselName;
@@ -12,6 +13,7 @@ class AssignedReport {
   const AssignedReport({
     required this.assignmentId,
     required this.reportId,
+    this.surveyJobId,
     required this.reportType,
     required this.title,
     required this.vesselName,
@@ -29,14 +31,29 @@ class AssignedReport {
     }
 
     return AssignedReport(
-      assignmentId: int.tryParse((json['assignmentId'] ?? json['AssignmentId'] ?? 0).toString()) ?? 0,
-      reportId: int.tryParse((json['reportId'] ?? json['ReportId'] ?? 0).toString()) ?? 0,
+      assignmentId:
+          int.tryParse(
+            (json['assignmentId'] ?? json['AssignmentId'] ?? 0).toString(),
+          ) ??
+          0,
+      reportId:
+          int.tryParse(
+            (json['reportId'] ?? json['ReportId'] ?? 0).toString(),
+          ) ??
+          0,
+      surveyJobId: int.tryParse(
+        (json['surveyJobId'] ?? json['SurveyJobId'] ?? '').toString(),
+      ),
       reportType: (json['reportType'] ?? json['ReportType'] ?? '').toString(),
       title: (json['title'] ?? json['Title'] ?? 'Report').toString(),
-      vesselName: (json['vesselName'] ?? json['VesselName'] ?? 'Vessel not specified').toString(),
+      vesselName:
+          (json['vesselName'] ?? json['VesselName'] ?? 'Vessel not specified')
+              .toString(),
       reference: (json['reference'] ?? json['Reference'] ?? '').toString(),
       status: (json['status'] ?? json['Status'] ?? 'Assigned').toString(),
-      createdBy: (json['createdBy'] ?? json['CreatedBy'] ?? 'Creator unavailable').toString(),
+      createdBy:
+          (json['createdBy'] ?? json['CreatedBy'] ?? 'Creator unavailable')
+              .toString(),
       assignedAt: assignedAt,
     );
   }

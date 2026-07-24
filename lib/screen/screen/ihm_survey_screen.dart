@@ -268,14 +268,21 @@ class _IHMSurveyScreenState extends State<IHMSurveyScreen>
       await IhmOfflineService.syncPendingIhmData();
       await _refreshPendingSyncCount();
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('IHM offline data synced')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Color(0xFF16A34A),
+          content: Text('All offline changes synced successfully'),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(e.toString())));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Sync failed. Your data is still saved on this device — we\'ll retry when you\'re back online.',
+          ),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _syncingIhm = false);
     }
@@ -748,6 +755,13 @@ class _IHMSurveyScreenState extends State<IHMSurveyScreen>
         widget.pendingUploads > 0 ||
         widget.pendingImages > 0 ||
         _pendingSyncCount > 0;
+
+    final title = hasPending ? "Saved offline" : "All synced";
+
+    final subtitle = hasPending
+        ? "Your data is saved on this device. It'll upload automatically once you're online, or tap Upload to sync now."
+        : "All your survey data is saved and backed up to the server.";
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -782,7 +796,7 @@ class _IHMSurveyScreenState extends State<IHMSurveyScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  hasPending ? "Pending Uploads" : "All Synced",
+                  title,
                   style: TextStyle(
                     color: _c.textPrimary,
                     fontSize: 15,
@@ -791,9 +805,24 @@ class _IHMSurveyScreenState extends State<IHMSurveyScreen>
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  "Queued changes: $_pendingSyncCount  ·  Checkpoints: ${widget.pendingUploads}  ·  Images: ${widget.pendingImages}",
-                  style: TextStyle(color: _c.textSecond, fontSize: 12),
+                  subtitle,
+                  style: TextStyle(
+                    color: _c.textSecond,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
                 ),
+                if (hasPending) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    "Queued: $_pendingSyncCount  ·  Checkpoints: ${widget.pendingUploads}  ·  Images: ${widget.pendingImages}",
+                    style: TextStyle(
+                      color: _c.textSecond,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -810,7 +839,7 @@ class _IHMSurveyScreenState extends State<IHMSurveyScreen>
               elevation: 0,
             ),
             child: Text(
-              _syncingIhm ? "Syncing" : (hasPending ? "Upload" : "Synced"),
+              _syncingIhm ? "Syncing..." : (hasPending ? "Upload" : "Synced"),
               style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
             ),
           ),

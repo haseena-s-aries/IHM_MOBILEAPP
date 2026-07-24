@@ -78,17 +78,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   bool get _isManager => _role == 'manager';
 
-  bool get _hasAllProjectAccess =>
-      _isAdmin || _projectName.contains('all');
+  bool get _hasAllProjectAccess => _isAdmin || _projectName.contains('all');
 
   bool get _hasAurasAccess =>
-      _hasAllProjectAccess || _projectName.contains('auras') || _hasManagedProject('auras');
+      _hasAllProjectAccess ||
+      _projectName.contains('auras') ||
+      _hasManagedProject('auras');
 
   bool get _hasIhmAccess =>
-      _hasAllProjectAccess || _projectName.contains('ihm') || _hasManagedProject('ihm');
+      _hasAllProjectAccess ||
+      _projectName.contains('ihm') ||
+      _hasManagedProject('ihm');
 
   bool get _hasExSurveyAccess =>
-      _hasAllProjectAccess || _projectName.contains('ex') || _hasManagedProject('ex');
+      _hasAllProjectAccess ||
+      _projectName.contains('ex') ||
+      _hasManagedProject('ex');
 
   bool get isSurveyor => _role == 'surveyor';
 
@@ -157,6 +162,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   CertificateReport? report;
   bool isLoading = true;
   bool _isRefreshingDashboard = false;
+  bool _isLoggingOut = false;
   int _pendingCount = 0;
   int _totalUsers = 0;
   int _ihmUsersCount = 0;
@@ -198,14 +204,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
 
     if (!mounted) return;
+
+    final isSuccess = snapshot.state == 'synced';
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(snapshot.message ?? snapshot.label),
+        backgroundColor: isSuccess ? const Color(0xFF16A34A) : null,
+        content: Text(
+          isSuccess ? 'Sync successful' : (snapshot.message ?? snapshot.label),
+        ),
         action: snapshot.failedCount > 0
-            ? SnackBarAction(
-                label: 'Retry',
-                onPressed: () => _runManualSync(),
-              )
+            ? SnackBarAction(label: 'Retry', onPressed: () => _runManualSync())
             : null,
       ),
     );
@@ -271,10 +279,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           'surveyorDashboardCompletedJobs',
           stats.completedJobs,
         );
-        await prefs.setInt(
-          'surveyorDashboardDueTodayJobs',
-          stats.dueTodayJobs,
-        );
+        await prefs.setInt('surveyorDashboardDueTodayJobs', stats.dueTodayJobs);
       } else {
         try {
           _manageableProjects = await ApiService.fetchManageableProjects();
@@ -411,10 +416,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           : prefs.getInt('seaFasteningCount') ?? 0;
       final loadout = isSurveyor ? 0 : prefs.getInt('loadoutCount') ?? 0;
       final liveJobs = prefs.getInt('surveyorDashboardLiveJobs') ?? 0;
-      final completedJobs =
-          prefs.getInt('surveyorDashboardCompletedJobs') ?? 0;
-      final dueTodayJobs =
-          prefs.getInt('surveyorDashboardDueTodayJobs') ?? 0;
+      final completedJobs = prefs.getInt('surveyorDashboardCompletedJobs') ?? 0;
+      final dueTodayJobs = prefs.getInt('surveyorDashboardDueTodayJobs') ?? 0;
       final cachedVessels = prefs.getInt('dashboardVesselsCount') ?? 0;
       final cachedIhmReports = prefs.getInt('dashboardIhmReportsCount') ?? 0;
       final cachedExReports =
@@ -559,62 +562,62 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             // ─── 3 HORIZONTAL QUICK-ACTION CARDS ───────────────────────────
             if (!isSurveyor)
               Row(
-              children: [
-                // Card 1: Certificates (Loadout / Towage / Seafastening)
-                if (!isSurveyor && _hasAurasAccess)
-                  _buildTopActionCard(
-                    icon: Icons.verified_rounded,
-                    label: 'Certificates',
-                    sublabel: 'Loadout · Towage\n· Seafastening',
-                    gradient: themeNotifier.isDarkMode
-                        ? const [Color(0xFF0D3024), Color(0xFF071A13)]
-                        : const [Color(0xFF11998E), Color(0xFF2ECC71)],
-                    iconColor: const Color(0xFF6FFFD4),
-                    onTap: () => _showCertificateDialog(context),
-                    isLast: false,
-                  ),
-                // Card 2: IHM Survey
-                if (_hasIhmAccess)
-                  _buildTopActionCard(
-                    icon: Icons.inventory_2_rounded,
-                    label: 'IHM Survey',
-                    sublabel: 'Inventory of\nHazardous Materials',
-                    gradient: themeNotifier.isDarkMode
-                        ? const [Color(0xFF0D1E3A), Color(0xFF071228)]
-                        : const [Color(0xFF4158D0), Color(0xFF2575FC)],
-                    iconColor: const Color(0xFF79B8FF),
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const SurveyJobListScreen(
-                          surveyType: 'IHM Survey',
+                children: [
+                  // Card 1: Certificates (Loadout / Towage / Seafastening)
+                  if (!isSurveyor && _hasAurasAccess)
+                    _buildTopActionCard(
+                      icon: Icons.verified_rounded,
+                      label: 'Certificates',
+                      sublabel: 'Loadout · Towage\n· Seafastening',
+                      gradient: themeNotifier.isDarkMode
+                          ? const [Color(0xFF0D3024), Color(0xFF071A13)]
+                          : const [Color(0xFF11998E), Color(0xFF2ECC71)],
+                      iconColor: const Color(0xFF6FFFD4),
+                      onTap: () => _showCertificateDialog(context),
+                      isLast: false,
+                    ),
+                  // Card 2: IHM Survey
+                  if (_hasIhmAccess)
+                    _buildTopActionCard(
+                      icon: Icons.inventory_2_rounded,
+                      label: 'IHM Survey',
+                      sublabel: 'Inventory of\nHazardous Materials',
+                      gradient: themeNotifier.isDarkMode
+                          ? const [Color(0xFF0D1E3A), Color(0xFF071228)]
+                          : const [Color(0xFF4158D0), Color(0xFF2575FC)],
+                      iconColor: const Color(0xFF79B8FF),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const SurveyJobListScreen(
+                            surveyType: 'IHM Survey',
+                          ),
                         ),
                       ),
+                      isLast: false,
                     ),
-                    isLast: false,
-                  ),
-                // Card 3: Ex-Survey
-                if (_hasExSurveyAccess)
-                  _buildTopActionCard(
-                    icon: Icons.electrical_services_rounded,
-                    label: 'Ex-Survey',
-                    sublabel: 'Explosion-proof\nEquipment Survey',
-                    gradient: themeNotifier.isDarkMode
-                        ? const [Color(0xFF3A0D0D), Color(0xFF220707)]
-                        : const [Color(0xFFFF416C), Color(0xFFFF6B35)],
-                    iconColor: const Color(0xFFFFB3B3),
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const SurveyJobListScreen(
-                          surveyType: 'Ex-Survey',
+                  // Card 3: Ex-Survey
+                  if (_hasExSurveyAccess)
+                    _buildTopActionCard(
+                      icon: Icons.electrical_services_rounded,
+                      label: 'Ex-Survey',
+                      sublabel: 'Explosion-proof\nEquipment Survey',
+                      gradient: themeNotifier.isDarkMode
+                          ? const [Color(0xFF3A0D0D), Color(0xFF220707)]
+                          : const [Color(0xFFFF416C), Color(0xFFFF6B35)],
+                      iconColor: const Color(0xFFFFB3B3),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const SurveyJobListScreen(
+                            surveyType: 'Ex-Survey',
+                          ),
                         ),
                       ),
+                      isLast: true,
                     ),
-                    isLast: true,
-                  ),
-              ],
-            ),
+                ],
+              ),
 
             // ───────────────────────────────────────────────────────────────
             if (!isSurveyor && _hasAurasAccess) ...[
@@ -744,9 +747,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => const SurveyJobListScreen(
-                          surveyType: 'IHM Survey',
-                        ),
+                        builder: (_) =>
+                            const SurveyJobListScreen(surveyType: 'IHM Survey'),
                       ),
                     );
                   },
@@ -761,9 +763,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => const SurveyJobListScreen(
-                          surveyType: 'Ex-Survey',
-                        ),
+                        builder: (_) =>
+                            const SurveyJobListScreen(surveyType: 'Ex-Survey'),
                       ),
                     );
                   },
@@ -851,7 +852,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildAurasTopProfile(),
+              _buildManagerWelcomeHeader(
+                pendingApprovals: _pendingCount,
+                flaggedForReview: attentionJobs,
+              ),
               const SizedBox(height: 16),
               LayoutBuilder(
                 builder: (context, constraints) {
@@ -977,14 +981,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         title: 'IHM All Jobs',
                         description:
                             'View all IHM survey jobs and job details.',
-                        meta: [
-                          '$ihmJobs job${ihmJobs == 1 ? '' : 's'}',
-                        ],
+                        meta: ['$ihmJobs job${ihmJobs == 1 ? '' : 's'}'],
                         actionLabel: 'Open jobs',
                         onTap: () => _openDashboardPage(
-                          const SurveyJobListScreen(
-                            surveyType: 'IHM Survey',
-                          ),
+                          const SurveyJobListScreen(surveyType: 'IHM Survey'),
                         ),
                       ),
                     if (canSeeIhm)
@@ -999,9 +999,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           '$_ihmReportsCount report${_ihmReportsCount == 1 ? '' : 's'}',
                         ],
                         actionLabel: 'Open reports',
-                        onTap: () => _openDashboardPage(
-                          const IhmReportsScreen(),
-                        ),
+                        onTap: () =>
+                            _openDashboardPage(const IhmReportsScreen()),
                       ),
                     if (canSeeIhm && !_isAdmin)
                       _adminAppCard(
@@ -1039,14 +1038,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         title: 'EX-Survey All Jobs',
                         description:
                             'View all accessible EX-Survey jobs and job details.',
-                        meta: [
-                          '$exJobs job${exJobs == 1 ? '' : 's'}',
-                        ],
+                        meta: ['$exJobs job${exJobs == 1 ? '' : 's'}'],
                         actionLabel: 'Open jobs',
                         onTap: () => _openDashboardPage(
-                          const SurveyJobListScreen(
-                            surveyType: 'Ex-Survey',
-                          ),
+                          const SurveyJobListScreen(surveyType: 'Ex-Survey'),
                         ),
                       ),
                     if (canSeeEx)
@@ -1119,7 +1114,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (canSeeVessels) Expanded(flex: 6, child: _vesselPanel()),
+                      if (canSeeVessels)
+                        Expanded(flex: 6, child: _vesselPanel()),
                       if (canSeeVessels) const SizedBox(width: 16),
                       Expanded(flex: 5, child: _recentActivityPanel()),
                     ],
@@ -1366,7 +1362,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ),
               const Spacer(),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: _toneSoft(badgeTone),
                   borderRadius: BorderRadius.circular(999),
@@ -1498,7 +1497,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ),
               const Spacer(),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: _toneSoft(_AurasTone.soon),
                   borderRadius: BorderRadius.circular(999),
@@ -1619,10 +1621,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _liveSummaryTile({
-    required int count,
-    required String label,
-  }) {
+  Widget _liveSummaryTile({required int count, required String label}) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
@@ -1671,19 +1670,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           elevation: 0,
           backgroundColor: const Color(0xFFE9E9FB),
           foregroundColor: const Color(0xFF4D4FB2),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
         child: FittedBox(
           fit: BoxFit.scaleDown,
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                label,
-                style: const TextStyle(fontWeight: FontWeight.w900),
-              ),
+              Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
               const SizedBox(width: 8),
               const Icon(Icons.arrow_forward_rounded, size: 17),
             ],
@@ -1698,11 +1692,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return _adminPanel(
       title: 'Vessel Master',
       actionLabel: 'All vessels',
-      onAction: () => _openDashboardPage(
-        const VesselMasterScreen(),
-      ),
+      onAction: () => _openDashboardPage(const VesselMasterScreen()),
       child: vessels.isEmpty
-          ? _adminEmptyState(Icons.directions_boat_rounded, 'No vessels available')
+          ? _adminEmptyState(
+              Icons.directions_boat_rounded,
+              'No vessels available',
+            )
           : Column(children: vessels.map(_vesselRow).toList()),
     );
   }
@@ -1787,7 +1782,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Widget _recentActivityPanel() {
     final activities = <Widget>[
-      ..._pendingUsers.take(2).map(
+      ..._pendingUsers
+          .take(2)
+          .map(
             (user) => _activityItem(
               '${user.fullName} requested ${user.requestedRole} approval',
               user.email,
@@ -1818,7 +1815,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ),
       ),
       child: activities.isEmpty
-          ? _adminEmptyState(Icons.schedule_rounded, 'No recent activity available')
+          ? _adminEmptyState(
+              Icons.schedule_rounded,
+              'No recent activity available',
+            )
           : Column(children: activities),
     );
   }
@@ -2120,9 +2120,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (_) => const VesselMasterScreen(),
-                  ),
+                  MaterialPageRoute(builder: (_) => const VesselMasterScreen()),
                 );
               },
             ),
@@ -2384,6 +2382,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Widget _buildSurveyorWelcomeHeader(bool isDark) {
     final userName = _displayName;
+    final due = surveyStats.dueTodayJobs;
+    final live = surveyStats.liveJobs;
+
+    final subtitle = due > 0
+        ? 'You have $due survey${due == 1 ? '' : 's'} due today'
+              '${live > 0 ? ' and $live in progress' : ''}.'
+        : live > 0
+        ? 'You have $live survey${live == 1 ? '' : 's'} in progress.'
+        : 'No surveys assigned today.';
 
     return Container(
       constraints: const BoxConstraints(minHeight: 142),
@@ -2418,18 +2425,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Welcome',
+                    const Text(
+                      'WELCOME',
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.72),
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFFF9466),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.4,
                       ),
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      userName,
-                      maxLines: 2,
+                      userName.toUpperCase(),
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white,
@@ -2438,8 +2446,90 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         height: 1.08,
                       ),
                     ),
+                    const SizedBox(height: 10),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.82),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ],
                 ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _timeGreeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
+
+  Widget _buildManagerWelcomeHeader({
+    required int pendingApprovals,
+    required int flaggedForReview,
+  }) {
+    final userName = _displayName;
+    final label = _isAdmin ? 'ADMIN DASHBOARD' : 'MANAGER DASHBOARD';
+
+    return Container(
+      width: double.infinity, // 👈 add this
+      constraints: const BoxConstraints(minHeight: 128),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF174B82), Color(0xFF2875BA)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF174B82).withOpacity(0.35),
+            blurRadius: 28,
+            offset: const Offset(0, 14),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: Stack(
+          children: [
+            Positioned(right: -48, top: -58, child: _buildDepthCircle(180)),
+            Positioned(right: 95, bottom: -76, child: _buildDepthCircle(135)),
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: Color(0xFFEF6DA8),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '${_timeGreeting()}, $userName',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 25,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -3182,8 +3272,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 Text(
                   'Sync Status',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 _syncDetailRow('Status', snapshot.label),
@@ -3261,6 +3351,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     String two(int number) => number.toString().padLeft(2, '0');
     return '${two(local.day)}/${two(local.month)}/${local.year} '
         '${two(local.hour)}:${two(local.minute)}';
+  }
+
+  Future<void> _logout() async {
+    if (_isLoggingOut) return;
+    setState(() => _isLoggingOut = true);
+
+    try {
+      await SyncService.logoutAndClearUserData();
+    } catch (error) {
+      debugPrint('Logout failed during cleanup: $error');
+    }
+
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
   @override
@@ -3361,26 +3465,49 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ),
             ),
           IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              try {
-                await SyncService.logoutAndClearUserData();
-              } catch (error) {
-                debugPrint('Logout failed during cleanup: $error');
-              }
-              if (!context.mounted) return;
-              Navigator.pushNamedAndRemoveUntil(
-                context,
-                '/login',
-                (route) => false,
-              );
-            },
+            icon: _isLoggingOut
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.logout),
+            onPressed: _isLoggingOut ? null : _logout,
           ),
         ],
       ),
-      body: _pages == null
-          ? const Center(child: CircularProgressIndicator())
-          : _buildCurrentPage(),
+      body: Column(
+        children: [
+          ValueListenableBuilder<SyncSnapshot>(
+            valueListenable: SyncService.syncStatus,
+            builder: (context, snapshot, _) {
+              if (!snapshot.isSyncing) return const SizedBox.shrink();
+              return Column(
+                children: [
+                  const LinearProgressIndicator(minHeight: 3),
+                  Container(
+                    width: double.infinity,
+                    color: colors.bgCard,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 6,
+                    ),
+                    child: Text(
+                      snapshot.message ?? 'Syncing your data...',
+                      style: TextStyle(fontSize: 12, color: colors.textSecond),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+          Expanded(
+            child: _pages == null
+                ? const Center(child: CircularProgressIndicator())
+                : _buildCurrentPage(),
+          ),
+        ],
+      ),
       bottomNavigationBar: BottomNavigationBar(
         backgroundColor: colors.bgCard,
         elevation: 18,
@@ -3403,30 +3530,30 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
               ]
             : isAdminOrManager
-                ? const [
-                    BottomNavigationBarItem(
-                      icon: Icon(Icons.dashboard),
-                      label: "Dashboard",
-                    ),
-                    BottomNavigationBarItem(
-                      icon: Icon(Icons.manage_accounts),
-                      label: "User Management",
-                    ),
-                    BottomNavigationBarItem(
-                      icon: Icon(Icons.person),
-                      label: "Profile",
-                    ),
-                  ]
-                : const [
-                    BottomNavigationBarItem(
-                      icon: Icon(Icons.dashboard),
-                      label: "Dashboard",
-                    ),
-                    BottomNavigationBarItem(
-                      icon: Icon(Icons.person),
-                      label: "Profile",
-                    ),
-                  ],
+            ? const [
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.dashboard),
+                  label: "Dashboard",
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.manage_accounts),
+                  label: "User Management",
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.person),
+                  label: "Profile",
+                ),
+              ]
+            : const [
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.dashboard),
+                  label: "Dashboard",
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.person),
+                  label: "Profile",
+                ),
+              ],
       ),
     );
   }

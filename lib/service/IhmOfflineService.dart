@@ -925,10 +925,18 @@ final existing = existingRows
       'ihm_cached_files',
       'sync_metadata',
     ]) {
-      await db.delete(table);
+      try {
+        await db.delete(table);
+      } catch (error) {
+        debugPrint('Logout: failed to clear $table: $error');
+      }
     }
 
-    await clearIhmLocalFiles();
+    try {
+      await clearIhmLocalFiles();
+    } catch (error) {
+      debugPrint('Logout: failed to clear IHM local files: $error');
+    }
   }
 
   static Future<void> _syncQueueItem(

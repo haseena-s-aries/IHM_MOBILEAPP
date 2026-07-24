@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'package:Auras/Db/database_helper.dart';
 import 'package:Auras/app_config.dart';
 import 'package:Auras/ihm_area.dart';
@@ -12,13 +12,13 @@ import 'package:Auras/model/survey_job.dart';
 import 'package:Auras/model/ihm_checkpoint_submission.dart';
 import 'package:Auras/model/app_notification.dart';
 import 'package:Auras/model/assigned_report.dart';
+import 'package:Auras/model/client_dashboard.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
-import 'package:pasteboard/pasteboard.dart';
 
 class ApiService {
   static const String _genericOtpError =
@@ -59,9 +59,7 @@ class ApiService {
     bool unreadOnly = false,
   }) async {
     final response = await http.get(
-      Uri.parse(
-        '$baseUrl/notifications/users/$userId?unreadOnly=$unreadOnly',
-      ),
+      Uri.parse('$baseUrl/notifications/users/$userId?unreadOnly=$unreadOnly'),
     );
     if (response.statusCode != 200) {
       throw Exception('Failed to load notifications: ${response.body}');
@@ -69,11 +67,7 @@ class ApiService {
 
     final List<dynamic> rows = jsonDecode(response.body);
     return rows
-        .map(
-          (row) => AppNotification.fromJson(
-            Map<String, dynamic>.from(row),
-          ),
-        )
+        .map((row) => AppNotification.fromJson(Map<String, dynamic>.from(row)))
         .toList();
   }
 
@@ -104,6 +98,50 @@ class ApiService {
     return rows
         .map((row) => AssignedReport.fromJson(Map<String, dynamic>.from(row)))
         .toList();
+  }
+
+  static Future<ClientDashboardSummary> fetchClientDashboardSummary() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/client-dashboard/summary'),
+      headers: await _authHeaders(),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to load client dashboard: ${response.body}');
+    }
+
+    return ClientDashboardSummary.fromJson(
+      Map<String, dynamic>.from(jsonDecode(response.body) as Map),
+    );
+  }
+
+  static Future<ClientJobSummary> fetchClientJobSummary(int jobId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final cacheKey = 'client_job_summary_$jobId';
+
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/client-dashboard/jobs/$jobId/summary'),
+        headers: await _authHeaders(),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Failed to load survey summary: ${response.body}');
+      }
+
+      await prefs.setString(cacheKey, response.body);
+      return ClientJobSummary.fromJson(
+        Map<String, dynamic>.from(jsonDecode(response.body) as Map),
+      );
+    } catch (error) {
+      final cached = prefs.getString(cacheKey);
+      if (cached != null && cached.isNotEmpty) {
+        return ClientJobSummary.fromJson(
+          Map<String, dynamic>.from(jsonDecode(cached) as Map),
+          fromCache: true,
+        );
+      }
+      rethrow;
+    }
   }
 
   static Future<List<Map<String, dynamic>>> fetchSavedReports() async {
@@ -177,7 +215,9 @@ class ApiService {
         response,
         fallbackMessage: 'Unable to send report. Please try again.',
       );
-      throw Exception(payload['message']?.toString() ?? 'Unable to send report.');
+      throw Exception(
+        payload['message']?.toString() ?? 'Unable to send report.',
+      );
     }
 
     try {
@@ -224,10 +264,13 @@ class ApiService {
     final path = type == 'ihm'
         ? '$baseUrl/ihm-survey/jobs/$reportId/report-pdf'
         : type == 'exsurvey'
-            ? '$baseUrl/ex-survey/jobs/$reportId/report'
-            : '$baseUrl/AdminDashboard/view-pdf/$type/$reportId';
+        ? '$baseUrl/ex-survey/jobs/$reportId/report'
+        : '$baseUrl/AdminDashboard/view-pdf/$type/$reportId';
 
-    final response = await http.get(Uri.parse(path), headers: await _authHeaders());
+    final response = await http.get(
+      Uri.parse(path),
+      headers: await _authHeaders(),
+    );
     if (response.statusCode != 200) {
       throw Exception('Failed to download report: ${response.body}');
     }
@@ -235,7 +278,9 @@ class ApiService {
     return response.bodyBytes;
   }
 
-  static Future<Uint8List> downloadAssignedReportPdf(AssignedReport report) async {
+  static Future<Uint8List> downloadAssignedReportPdf(
+    AssignedReport report,
+  ) async {
     final type = report.reportType.toLowerCase();
     final path = type == 'ihm'
         ? '$baseUrl/ihm-survey/jobs/${report.reportId}/report-pdf'
@@ -263,9 +308,8 @@ class ApiService {
     final List<dynamic> rows = jsonDecode(response.body);
     return rows
         .map(
-          (row) => IhmCheckpointSubmission.fromJson(
-            Map<String, dynamic>.from(row),
-          ),
+          (row) =>
+              IhmCheckpointSubmission.fromJson(Map<String, dynamic>.from(row)),
         )
         .toList();
   }
@@ -280,10 +324,7 @@ class ApiService {
         '$baseUrl/ihm-survey/checkpoint-submissions/$submissionId/approve',
       ),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'reviewedByUserId': reviewerUserId,
-        'notes': notes,
-      }),
+      body: jsonEncode({'reviewedByUserId': reviewerUserId, 'notes': notes}),
     );
     if (response.statusCode != 200) throw Exception(response.body);
   }
@@ -481,9 +522,7 @@ class ApiService {
 
   static Future<String> generateIhmReport(int jobId) async {
     final markerMapResponse = await http.post(
-      Uri.parse(
-        '$baseUrl/ihm-survey/jobs/$jobId/generate-ga-marker-map',
-      ),
+      Uri.parse('$baseUrl/ihm-survey/jobs/$jobId/generate-ga-marker-map'),
     );
 
     if (markerMapResponse.statusCode != 200) {
@@ -770,7 +809,8 @@ class ApiService {
       'liveJobs': readInt('ihmLiveJobs') > 0 || readInt('ihmCompletedJobs') > 0
           ? readInt('ihmLiveJobs')
           : readInt('liveIhmJobs'),
-      'ihmLiveJobs': readInt('ihmLiveJobs') > 0 || readInt('ihmCompletedJobs') > 0
+      'ihmLiveJobs':
+          readInt('ihmLiveJobs') > 0 || readInt('ihmCompletedJobs') > 0
           ? readInt('ihmLiveJobs')
           : readInt('liveIhmJobs'),
       'completedJobs': readInt('ihmCompletedJobs'),
@@ -1166,29 +1206,26 @@ class ApiService {
     final List data = jsonDecode(response.body);
     return data.map((e) => SurveyJob.fromJson(e)).toList();
   }
+
   static Future<void> updateSurveyDate({
-  required int surveyJobId,
-  required DateTime surveyDate,
-}) async {
-  final url = Uri.parse('$baseUrl/survey/jobs/$surveyJobId/survey-date');
+    required int surveyJobId,
+    required DateTime surveyDate,
+  }) async {
+    final url = Uri.parse('$baseUrl/survey/jobs/$surveyJobId/survey-date');
 
-  final response = await http.post(
-    url,
-    headers: {
-      'Content-Type': 'application/json',
-      ...await _authHeaders(),
-    },
-    body: jsonEncode({
-      'surveyDate': surveyDate.toIso8601String(),
-    }),
-  );
-
-  if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw Exception(
-      "Failed to update survey date (${response.statusCode}): ${response.body}",
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json', ...await _authHeaders()},
+      body: jsonEncode({'surveyDate': surveyDate.toIso8601String()}),
     );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        "Failed to update survey date (${response.statusCode}): ${response.body}",
+      );
+    }
   }
-}
+
   static Future<void> updateSurveyJobStatus({
     required int surveyJobId,
     required String status,
@@ -1652,8 +1689,11 @@ class ApiService {
       'roleName': user['roleName'] ?? user['RoleName'],
       'requestedRole': user['requestedRole'] ?? user['RequestedRole'],
       'replaceProjectAccesses':
-          user['replaceProjectAccesses'] ?? user['ReplaceProjectAccesses'] ?? false,
-      'projectAccesses': user['projectAccesses'] ?? user['ProjectAccesses'] ?? [],
+          user['replaceProjectAccesses'] ??
+          user['ReplaceProjectAccesses'] ??
+          false,
+      'projectAccesses':
+          user['projectAccesses'] ?? user['ProjectAccesses'] ?? [],
       if ((user['password'] ?? user['Password']) != null)
         'password': user['password'] ?? user['Password'],
     };
@@ -1779,7 +1819,9 @@ class ApiService {
     throw Exception("Failed to load manageable projects: ${response.body}");
   }
 
-  static Future<List<RoleOption>> fetchManagedProjectRoles(int projectId) async {
+  static Future<List<RoleOption>> fetchManagedProjectRoles(
+    int projectId,
+  ) async {
     final response = await http.get(
       Uri.parse('$baseUrl/AdminDashboard/projects/$projectId/roles'),
       headers: await _authHeaders(),
@@ -1862,7 +1904,7 @@ class ApiService {
     required int vesselId,
     required String siteName,
     required String startDate,
-  
+
     required String endDate,
     required int createdByUserId,
     int? assignedManagerId,
@@ -2331,4 +2373,3 @@ class SurveyorOption {
     return '$name - $email';
   }
 }
-

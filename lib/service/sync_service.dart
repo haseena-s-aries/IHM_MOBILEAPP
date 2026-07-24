@@ -84,6 +84,7 @@ class SyncSnapshot {
 
 class SyncService {
   static bool _isSyncing = false;
+  static bool _logoutInProgress = false;
   static bool _cancelRequested = false;
   static StreamSubscription<ConnectivityResult>? _connectivitySubscription;
   static final ValueNotifier<SyncSnapshot> syncStatus =
@@ -118,27 +119,62 @@ class SyncService {
   }
 
   static Future<void> logoutAndClearUserData() async {
+    if (_logoutInProgress) return;
+    _logoutInProgress = true;
+
     requestCancel();
     try {
-      await stopAutoSync();
-    } catch (error) {
-      debugPrint('Logout: failed to stop auto sync: $error');
-    }
+      try {
+        await stopAutoSync();
+      } catch (error) {
+        debugPrint('Logout: failed to stop auto sync: $error');
+      }
 
-    var waitCycles = 0;
-    while (_isSyncing && waitCycles < 50) {
-      await Future.delayed(const Duration(milliseconds: 100));
-      waitCycles++;
-    }
-
-    final prefs = await SharedPreferences.getInstance();
-    try {
-      await clearLocalUserData();
-    } catch (error) {
-      debugPrint('Logout: failed to clear local sync data: $error');
-    } finally {
-      await prefs.clear();
+      final prefs = await SharedPreferences.getInstance();
+      await _clearSessionPreferences(prefs);
       syncStatus.value = SyncSnapshot.initial();
+
+      var waitCycles = 0;
+      while (_isSyncing && waitCycles < 10) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        waitCycles++;
+      }
+
+      try {
+        await clearLocalUserData().timeout(const Duration(seconds: 3));
+      } catch (error) {
+        debugPrint('Logout: failed to clear local sync data: $error');
+      }
+    } finally {
+      _logoutInProgress = false;
+    }
+  }
+
+  static Future<void> _clearSessionPreferences(SharedPreferences prefs) async {
+    for (final key in const [
+      'isLoggedIn',
+      'token',
+      'userRole',
+      'userId',
+      'fullName',
+      'email',
+      'projectName',
+      'rememberMe',
+      'remember_me',
+      'savedEmail',
+      'savedPassword',
+      'rememberedEmail',
+      'rememberedPassword',
+    ]) {
+      await prefs.remove(key);
+    }
+
+    final cacheKeys = prefs
+        .getKeys()
+        .where((key) => key.startsWith('survey_jobs_cache_'))
+        .toList();
+    for (final key in cacheKeys) {
+      await prefs.remove(key);
     }
   }
 
