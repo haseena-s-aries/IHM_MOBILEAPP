@@ -52,7 +52,56 @@ class _AssignedReportsScreenState extends State<AssignedReportsScreen> {
       );
     }
   }
+Future<void> _sendRemark(AssignedReport report) async {
+  final controller = TextEditingController();
 
+  final remark = await showDialog<String>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Send Remark'),
+      content: TextField(
+        controller: controller,
+        maxLines: 5,
+        decoration: const InputDecoration(
+          hintText: 'Type remark...',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, controller.text.trim()),
+          child: const Text('Send'),
+        ),
+      ],
+    ),
+  );
+
+  controller.dispose();
+
+  if (remark == null || remark.isEmpty) return;
+
+  try {
+    final message = await ApiService.sendReportRemark(
+      reportType: report.reportType,
+      reportId: report.reportId,
+      remark: remark,
+    );
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Unable to send remark: $e')),
+    );
+  }
+}
   void _openSurveySummary(AssignedReport report) {
     final jobId = report.surveyJobId ?? report.reportId;
     showModalBottomSheet<void>(
@@ -383,6 +432,12 @@ class _AssignedReportsScreenState extends State<AssignedReportsScreen> {
                     icon: const Icon(Icons.download),
                     label: const Text('Download'),
                   ),
+                ),
+                const SizedBox(width: 10),
+                IconButton.outlined(
+                  tooltip: 'Send remark',
+                  onPressed: () => _sendRemark(report),
+                  icon: const Icon(Icons.comment_outlined),
                 ),
               ],
             ),

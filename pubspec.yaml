@@ -34,7 +34,7 @@ dependencies:
   syncfusion_flutter_pdf: ^31.1.17
   syncfusion_flutter_pdfviewer: ^31.1.17
   pasteboard: ^0.2.0
-
+  image: ^4.1.7
 
 
 

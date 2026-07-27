@@ -9,7 +9,9 @@ import 'package:Auras/screen/screen/Seafastening_certificate_screen.dart';
 import 'package:Auras/screen/screen/TaskManager_screen.dart';
 import 'package:Auras/screen/screen/Towage_certificate_screen.dart';
 import 'package:Auras/screen/screen/assigned_reports_screen.dart';
+import 'package:Auras/screen/screen/client_report_remarks_screen.dart';
 import 'package:Auras/screen/screen/changepassword_screen.dart'
+
     show ChangePasswordScreen;
 import 'package:Auras/screen/screen/ihm_reports_screen.dart';
 import 'package:Auras/screen/screen/pdf_viewer_screen.dart';
@@ -953,6 +955,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       : width >= 660
                       ? 2
                       : 1;
+                  
                   final appCards = <Widget>[
                     if (canSeeAuras)
                       _adminAppCard(
@@ -1002,6 +1005,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         onTap: () =>
                             _openDashboardPage(const IhmReportsScreen()),
                       ),
+                      if (canSeeIhm)
+                        _adminAppCard(
+                          icon: Icons.mark_chat_unread_outlined,
+                          iconTone: _AurasTone.violet,
+                          badge: 'Feedback',
+                          badgeTone: _AurasTone.violet,
+                          title: 'Client Remarks',
+                          description: 'View remarks sent by clients for IHM reports.',
+                          meta: const ['Client feedback'],
+                          actionLabel: 'Open remarks',
+                          onTap: () => _openDashboardPage(const ClientReportRemarksScreen()),
+                        ),
                     if (canSeeIhm && !_isAdmin)
                       _adminAppCard(
                         icon: Icons.sync_rounded,
@@ -1958,7 +1973,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget _buildSurveyorDashboard(bool isDark) {
     final liveJobs = surveyStats.liveJobs;
     final completedJobs = surveyStats.completedJobs;
-    final dueTodayJobs = surveyStats.dueTodayJobs;
+  
     final totalAssigned = liveJobs + completedJobs;
     final successRate = totalAssigned == 0
         ? 0
@@ -2023,47 +2038,41 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             LayoutBuilder(
               builder: (context, constraints) {
                 final width = constraints.maxWidth;
-                final crossAxisCount = width >= 720
-                    ? 3
-                    : width >= 430
-                    ? 2
-                    : 1;
+                
                 final cards = [
-                  _buildSmallKpiCard(
-                    icon: Icons.assignment_turned_in,
-                    count: completedJobs,
-                    title: 'Surveys Done',
-                    subtitle: 'Completed jobs',
-                    color: const Color(0xFF2563EB),
-                  ),
-                  _buildSmallKpiCard(
-                    icon: Icons.schedule,
-                    count: liveJobs,
-                    title: 'Pending Jobs',
-                    subtitle: 'Assigned unfinished jobs',
-                    color: const Color(0xFFF59E0B),
-                  ),
-                  _buildSmallKpiCard(
-                    icon: Icons.today,
-                    count: dueTodayJobs,
-                    title: 'Due Today',
-                    subtitle: 'End date is today',
-                    color: const Color(0xFF7C3AED),
-                  ),
-                ];
+                    _buildSmallKpiCard(
+                      icon: Icons.assignment_turned_in,
+                      count: completedJobs,
+                      title: 'Surveys Done',
+                      subtitle: 'Completed jobs',
+                      color: const Color(0xFF2563EB),
+                    ),
+                    _buildSmallKpiCard(
+                      icon: Icons.schedule,
+                      count: liveJobs,
+                      title: 'Pending Jobs',
+                      subtitle: 'Assigned unfinished jobs',
+                      color: const Color(0xFFF59E0B),
+                    ),
+                  ];
 
-                return GridView.builder(
-                  itemCount: cards.length,
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: crossAxisCount,
-                    mainAxisExtent: 148,
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                  ),
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemBuilder: (context, index) => cards[index],
-                );
+                if (constraints.maxWidth < 430) {
+                    return Column(
+                      children: [
+                        cards[0],
+                        const SizedBox(height: 12),
+                        cards[1],
+                      ],
+                    );
+                  }
+
+                  return Row(
+                    children: [
+                      Expanded(child: cards[0]),
+                      const SizedBox(width: 12),
+                      Expanded(child: cards[1]),
+                    ],
+                  );
               },
             ),
             const SizedBox(height: 24),

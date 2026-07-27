@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'package:Auras/Db/database_helper.dart';
 import 'package:Auras/app_config.dart';
 import 'package:Auras/ihm_area.dart';
@@ -255,7 +255,48 @@ class ApiService {
     } catch (_) {}
     return 'Report assignment removed.';
   }
+static Future<String> sendReportRemark({
+  required String reportType,
+  required int reportId,
+  required String remark,
+}) async {
+  final response = await http.post(
+    Uri.parse('$baseUrl/report-remarks'),
+    headers: {
+      ...await _authHeaders(),
+      'Content-Type': 'application/json',
+    },
+    body: jsonEncode({
+      'reportType': reportType,
+      'reportId': reportId,
+      'remark': remark,
+    }),
+  );
 
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw Exception(response.body);
+  }
+
+  final decoded = jsonDecode(response.body);
+  return (decoded['message'] ?? decoded['Message'] ?? 'Remark sent successfully.')
+      .toString();
+}
+
+static Future<List<Map<String, dynamic>>> fetchReportRemarks() async {
+  final response = await http.get(
+    Uri.parse('$baseUrl/report-remarks'),
+    headers: await _authHeaders(),
+  );
+
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw Exception(response.body);
+  }
+
+  final decoded = jsonDecode(response.body);
+  return decoded is List
+      ? decoded.map((x) => Map<String, dynamic>.from(x)).toList()
+      : <Map<String, dynamic>>[];
+}
   static Future<Uint8List> downloadSavedReportPdf({
     required String reportType,
     required int reportId,
@@ -1207,6 +1248,7 @@ class ApiService {
     return data.map((e) => SurveyJob.fromJson(e)).toList();
   }
 
+  
   static Future<void> updateSurveyDate({
     required int surveyJobId,
     required DateTime surveyDate,
@@ -2274,7 +2316,65 @@ class ApiService {
       throw Exception(res.body);
     }
   }
+static Future<List<IhmSamplingPhoto>> saveAppendixThreeSelection({
+  required int checkpointId,
+  required List<int> photoIds,
+}) async {
+  final response = await http.post(
+    Uri.parse('$baseUrl/ihm-survey/checkpoints/$checkpointId/appendix-three-selection'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'photoIds': photoIds}),
+  );
 
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw Exception(response.body);
+  }
+
+  final data = jsonDecode(response.body) as List;
+  return data.map((x) => IhmSamplingPhoto.fromJson(x)).toList();
+}
+
+static Future<IhmSamplingPhoto> saveAppendixThreeEditedImage({
+  required int photoId,
+  required List<int> bytes,
+  required int width,
+  required int height,
+}) async {
+  final request = http.MultipartRequest(
+    'POST',
+    Uri.parse('$baseUrl/ihm-survey/sampling-photos/$photoId/appendix-three-edit'),
+  );
+
+  request.fields['width'] = width.toString();
+  request.fields['height'] = height.toString();
+  request.files.add(http.MultipartFile.fromBytes(
+    'file',
+    bytes,
+    filename: 'appendix3-$photoId.jpg',
+  ));
+
+  final streamed = await request.send();
+  final body = await streamed.stream.bytesToString();
+
+  if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+    throw Exception(body);
+  }
+
+  return IhmSamplingPhoto.fromJson(jsonDecode(body));
+}
+static Future<IhmSamplingPhoto> rotateAppendixThreeImage({
+  required int photoId,
+}) async {
+  final response = await http.post(
+    Uri.parse('$baseUrl/ihm-survey/sampling-photos/$photoId/appendix-three-rotate'),
+  );
+
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw Exception(response.body);
+  }
+
+  return IhmSamplingPhoto.fromJson(jsonDecode(response.body));
+}
   static Future<SurveyJob> createExSurveyJob({
     required String jobNumber,
     required String clientName,

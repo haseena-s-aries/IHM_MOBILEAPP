@@ -4,12 +4,13 @@ import 'package:Auras/screen/screen/ihm_conflict_review_screen.dart';
 import 'package:Auras/service/IhmOfflineService.dart';
 import 'package:Auras/service/api_service.dart';
 import 'package:Auras/utils/app_dialog.dart';
-
+import 'package:http/http.dart' as http;
 import 'dart:io';
-
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/painting.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:image/image.dart' as img;
 import 'package:provider/provider.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 
@@ -495,47 +496,7 @@ class _DetailsTab extends StatelessWidget {
 
         // ── Audit Results ─────────────────────────────────────────────────
         _sectionLabel('AUDIT RESULTS'),
-        Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            color: _auditColor.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: _auditColor.withValues(alpha: 0.35)),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                auditSaved && _isAuditComplete
-                    ? Icons.check_circle_rounded
-                    : Icons.pending_actions_rounded,
-                color: _auditColor,
-                size: 20,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _auditDisplayText,
-                      style: TextStyle(
-                        color: _c.textPrimary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _auditStatusText,
-                      style: TextStyle(color: _auditColor, fontSize: 11),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+        
         _infoCard([
           _InfoRow(
             Icons.article_outlined,
@@ -548,38 +509,7 @@ class _DetailsTab extends StatelessWidget {
             val(checkpoint.checkResult),
           ),
         ]),
-        Container(
-          margin: const EdgeInsets.only(bottom: 18),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          decoration: BoxDecoration(
-            color: _c.bgCard,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: _c.divider),
-          ),
-          child: DropdownButtonFormField<String>(
-            value: auditResult,
-            decoration: const InputDecoration(
-              labelText: 'Audit Result',
-              border: InputBorder.none,
-            ),
-            items: const [
-              DropdownMenuItem(value: 'Pending', child: Text('Pending')),
-              DropdownMenuItem(value: 'Present', child: Text('Present')),
-              DropdownMenuItem(value: 'NotPresent', child: Text('Not Present')),
-              DropdownMenuItem(
-                value: 'NotApplicable',
-                child: Text('Not Applicable'),
-              ),
-              DropdownMenuItem(
-                value: 'SampleRequired',
-                child: Text('Sample Required'),
-              ),
-            ],
-            onChanged: (value) {
-              if (value != null) onAuditResultChanged(value);
-            },
-          ),
-        ),
+        
 
         // ── PCHM & Remarks ────────────────────────────────────────────────
         _sectionLabel('FLAGS & REMARKS'),
@@ -652,7 +582,7 @@ class _DetailsTab extends StatelessWidget {
         const SizedBox(height: 12),
         _ThemedTextField(
           controller: locationRemarks,
-          label: 'Location Remarks (if any)',
+          label: 'Site Remarks (if any)',
           icon: Icons.add_location_alt_outlined,
           isDark: isDark,
         ),
@@ -1418,6 +1348,18 @@ class _ImagesTabState extends State<_ImagesTab> {
     _loadPhotos();
   }
 
+  String _displayPhotoPath(IhmSamplingPhoto photo) {
+  final edited = photo.appendixThreeEditedFilePath;
+  if (edited != null &&
+      edited.trim().isNotEmpty &&
+      (photo.appendixThreeWidth ?? 0) > 0 &&
+      (photo.appendixThreeHeight ?? 0) > 0) {
+    return edited;
+  }
+
+  return photo.filePath;
+}
+
   Future<void> _loadPhotos() async {
     try {
       final result = await IhmOfflineService.getCheckpointPhotos(
@@ -1445,6 +1387,7 @@ class _ImagesTabState extends State<_ImagesTab> {
       final List<XFile> files;
       if (source == ImageSource.gallery) {
         files = await picker.pickMultiImage(imageQuality: 75);
+
       } else {
         final file = await picker.pickImage(source: source, imageQuality: 75);
         files = file == null ? <XFile>[] : <XFile>[file];
@@ -1480,6 +1423,45 @@ class _ImagesTabState extends State<_ImagesTab> {
       ).showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
+
+Future<void> _toggleAppendixThree(IhmSamplingPhoto photo) async {
+  final selectedIds = photos
+      .where((x) => x.showInAppendixThree)
+      .map((x) => x.id)
+      .toList();
+
+  if (selectedIds.contains(photo.id)) {
+    selectedIds.remove(photo.id);
+  } else {
+    if (selectedIds.length >= 2) {
+      await AppDialog.error(
+        context,
+        title: 'Limit exceeded',
+        message: 'Only 2 images can be selected for Appendix 3.',
+      );
+      return;
+    }
+    selectedIds.add(photo.id);
+  }
+
+  final updated = await ApiService.saveAppendixThreeSelection(
+    checkpointId: widget.checkpoint.id,
+    photoIds: selectedIds,
+  );
+
+  if (!mounted) return;
+  setState(() => photos = updated);
+}
+
+Future<void> _editAppendixThreeImage(IhmSamplingPhoto photo) async {
+  final saved = await ApiService.rotateAppendixThreeImage(photoId: photo.id);
+
+  if (!mounted) return;
+  setState(() {
+    final index = photos.indexWhere((x) => x.id == saved.id);
+    if (index >= 0) photos[index] = saved;
+  });
+}
 
   void _showImageOptions() {
     showModalBottomSheet(
@@ -1547,22 +1529,37 @@ class _ImagesTabState extends State<_ImagesTab> {
     }
   }
 
-  Widget _buildPhotoImage(IhmSamplingPhoto photo) {
+Widget _buildPhotoImage(IhmSamplingPhoto photo) {
+  final imageWidget = () {
     final localPath = photo.localFilePath;
+
     if (localPath != null && localPath.isNotEmpty) {
       return Image.file(
         File(localPath),
-        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+        fit: BoxFit.contain,
         errorBuilder: (_, __, ___) => _brokenPhoto(),
       );
     }
 
     return Image.network(
-      ApiService.fileUrl(photo.filePath),
-      fit: BoxFit.cover,
+      ApiService.fileUrl(_displayPhotoPath(photo)),
+      width: double.infinity,
+      height: double.infinity,
+      fit: BoxFit.contain,
       errorBuilder: (_, __, ___) => _offlinePhotoPlaceholder(),
     );
-  }
+  }();
+
+  return Container(
+    width: double.infinity,
+    height: double.infinity,
+    color: _c.bgCardAlt,
+    alignment: Alignment.center,
+    child: imageWidget,
+  );
+}
 
   Widget _brokenPhoto() {
     return Container(
@@ -1622,40 +1619,108 @@ class _ImagesTabState extends State<_ImagesTab> {
               : GridView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
-                    childAspectRatio: 0.9,
-                  ),
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                      childAspectRatio: 1.05,
+                    ),
                   itemCount: photos.length,
                   itemBuilder: (context, index) {
                     final photo = photos[index];
+                    final selected = photo.showInAppendixThree == true;
+                   
 
-                    return ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          _buildPhotoImage(photo),
-                          Positioned(
-                            top: 6,
-                            right: 6,
-                            child: Material(
-                              color: Colors.black.withOpacity(0.55),
-                              shape: const CircleBorder(),
-                              child: IconButton(
-                                icon: const Icon(
-                                  Icons.delete,
-                                  color: Colors.white,
-                                  size: 18,
-                                ),
-                                onPressed: () => _deletePhoto(photo),
-                              ),
+                    return Container(
+                            decoration: BoxDecoration(
+                              color: _c.bgCardAlt,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: _c.divider),
                             ),
-                          ),
-                        ],
-                      ),
-                    );
+                            clipBehavior: Clip.antiAlias,
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                Positioned.fill(
+                                  child: Container(
+                                    color: _c.bgCardAlt,
+                                    alignment: Alignment.center,
+                                    child: _buildPhotoImage(photo),
+                                  ),
+                                ),
+
+                                Positioned(
+                                  left: 8,
+                                  top: 8,
+                                  child: Material(
+                                    color: Colors.black.withOpacity(0.58),
+                                    shape: const CircleBorder(),
+                                    child: InkWell(
+                                      customBorder: const CircleBorder(),
+                                      onTap: () => _toggleAppendixThree(photo),
+                                      child: SizedBox(
+                                        width: 38,
+                                        height: 38,
+                                        child: Center(
+                                          child: Checkbox(
+                                            value: selected,
+                                            visualDensity: VisualDensity.compact,
+                                            materialTapTargetSize:
+                                                MaterialTapTargetSize.shrinkWrap,
+                                            activeColor: _A.accent,
+                                            checkColor: Colors.white,
+                                            side: const BorderSide(
+                                              color: Colors.white,
+                                              width: 2,
+                                            ),
+                                            onChanged: (_) =>
+                                                _toggleAppendixThree(photo),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+
+                                if (selected)
+                                  Positioned(
+                                    left: 8,
+                                    bottom: 8,
+                                    child: Material(
+                                      color: Colors.black.withOpacity(0.62),
+                                      shape: const CircleBorder(),
+                                      child: IconButton(
+                                        tooltip: 'Rotate image',
+                                        icon: const Icon(
+                                          Icons.rotate_right,
+                                          color: Colors.white,
+                                          size: 21,
+                                        ),
+                                        onPressed: () =>
+                                            _editAppendixThreeImage(photo),
+                                      ),
+                                    ),
+                                  ),
+
+                                Positioned(
+                                  top: 6,
+                                  right: 6,
+                                  child: Material(
+                                    color: Colors.black.withOpacity(0.58),
+                                    shape: const CircleBorder(),
+                                    child: IconButton(
+                                      tooltip: 'Delete image',
+                                      icon: const Icon(
+                                        Icons.delete,
+                                        color: Colors.white,
+                                        size: 19,
+                                      ),
+                                      onPressed: () => _deletePhoto(photo),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
                   },
                 ),
         ),
