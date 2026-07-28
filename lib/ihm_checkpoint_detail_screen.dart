@@ -3,7 +3,6 @@ import 'package:Auras/ihm_area.dart';
 import 'package:Auras/screen/screen/ihm_conflict_review_screen.dart';
 import 'package:Auras/service/IhmOfflineService.dart';
 import 'package:Auras/service/api_service.dart';
-import 'package:Auras/service/sync_service.dart';
 import 'package:Auras/utils/app_dialog.dart';
 import 'package:Auras/service/sync_service.dart';
 import 'package:http/http.dart' as http;
@@ -78,6 +77,7 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
   late String auditStatus;
   bool _saving = false;
   bool _isLoggingOut = false;
+
   late bool _auditSaved;
   late TextEditingController remarks;
   late TextEditingController locationRemarks;
@@ -561,39 +561,6 @@ class _DetailsTab extends StatelessWidget {
           ),
         ),
         // ── PCHM & Remarks ────────────────────────────────────────────────
-        Container(
-          width: double.infinity,
-          margin: const EdgeInsets.only(bottom: 18),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: _c.bgCard,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: _c.divider, width: 1),
-          ),
-          child: DropdownButtonFormField<String>(
-            value: auditStatus,
-            decoration: InputDecoration(
-              labelText: 'Audit Result',
-              labelStyle: TextStyle(color: _c.textSecond),
-              prefixIcon: Icon(
-                Icons.assignment_turned_in_outlined,
-                color: _auditColor,
-              ),
-              border: const OutlineInputBorder(),
-            ),
-            dropdownColor: _c.bgCard,
-            style: TextStyle(color: _c.textPrimary),
-            items: const [
-              DropdownMenuItem(value: 'Pending', child: Text('Pending')),
-              DropdownMenuItem(value: 'InProgress', child: Text('In Progress')),
-              DropdownMenuItem(value: 'Done', child: Text('Done')),
-            ],
-            onChanged: (value) {
-              if (value != null) onAuditResultChanged(value);
-            },
-          ),
-        ),
-
         _sectionLabel('FLAGS & REMARKS'),
         Container(
           margin: const EdgeInsets.only(bottom: 18),
