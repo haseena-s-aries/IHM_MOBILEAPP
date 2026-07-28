@@ -5,6 +5,7 @@ import 'package:Auras/model/ihm_checkpoint_submission.dart';
 import 'package:Auras/model/survey_job.dart';
 import 'package:Auras/service/IhmOfflineService.dart';
 import 'package:Auras/service/api_service.dart';       // ← ADD THIS
+import 'package:Auras/service/sync_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -61,6 +62,7 @@ class _IhmAreasScreenState extends State<IhmAreasScreen> {
   // ✅ These belong HERE — inside _IhmAreasScreenState
   final Map<int, bool> _uploadingLayout = {};
   late Future<List<IhmArea>> _areasFuture;
+  bool _isLoggingOut = false;
 
   _TC get _c =>
       context.watch<ThemeNotifier>().isDarkMode ? _TC.dark : _TC.light;
@@ -86,6 +88,18 @@ class _IhmAreasScreenState extends State<IhmAreasScreen> {
     setState(() {
       _areasFuture = IhmOfflineService.getAreasForJob(widget.job.id);
     });
+  }
+
+  Future<void> _logout() async {
+    if (_isLoggingOut) return;
+    setState(() => _isLoggingOut = true);
+    try {
+      await SyncService.logoutAndClearUserData();
+    } catch (error) {
+      debugPrint('Logout failed during cleanup: $error');
+    }
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
   Future<void> _uploadAreaLayout(IhmArea a) async {
@@ -157,6 +171,19 @@ class _IhmAreasScreenState extends State<IhmAreasScreen> {
             fontWeight: FontWeight.w700,
           ),
         ),
+        actions: [
+          IconButton(
+            icon: _isLoggingOut
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.logout),
+            tooltip: 'Logout',
+            onPressed: _isLoggingOut ? null : _logout,
+          ),
+        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(height: 1, color: _c.divider),
@@ -461,7 +488,7 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
       ),
     };
     var procedure = checkpoint.isSample ? 'Sample' : 'Visual';
-    var auditResult = checkpoint.result;
+    var auditStatus = checkpoint.auditStatus;
     var isPchm = checkpoint.isPchm;
 
     final updated = await showDialog<IhmCheckpoint>(
@@ -496,27 +523,19 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
                   _editField(fields['documentResult']!, 'Document Analysis Result'),
                   _editField(fields['checkResult']!, 'Check Result'),
                   DropdownButtonFormField<String>(
-                    value: auditResult,
+                    value: auditStatus,
                     decoration: const InputDecoration(labelText: 'Audit Result'),
                     items: const [
                       DropdownMenuItem(value: 'Pending', child: Text('Pending')),
-                      DropdownMenuItem(value: 'Present', child: Text('Present')),
                       DropdownMenuItem(
-                        value: 'NotPresent',
-                        child: Text('Not Present'),
+                        value: 'InProgress',
+                        child: Text('In Progress'),
                       ),
-                      DropdownMenuItem(
-                        value: 'NotApplicable',
-                        child: Text('Not Applicable'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'SampleRequired',
-                        child: Text('Sample Required'),
-                      ),
+                      DropdownMenuItem(value: 'Done', child: Text('Done')),
                     ],
                     onChanged: (value) {
                       if (value != null) {
-                        setDialogState(() => auditResult = value);
+                        setDialogState(() => auditStatus = value);
                       }
                     },
                   ),
@@ -579,7 +598,7 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
                   manufacturerBrandName: fields['manufacturer']!.text.trim(),
                   documentAnalysisResult: fields['documentResult']!.text.trim(),
                   checkResult: fields['checkResult']!.text.trim(),
-                  result: auditResult,
+                  auditStatus: auditStatus,
                   remarks: fields['remarks']!.text.trim(),
                   locationRemarks: fields['locationRemarks']!.text.trim(),
                   samplingCheck: procedure == 'Sample' ? 'S' : '-',
@@ -846,14 +865,14 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
         return _surveyInfoRow(
           Icons.check_circle_outline_rounded,
           'Checkpoint updated',
-          'Result: ${_displayResult(checkpoint.result)}',
+          'Audit: ${_displayAuditStatus(checkpoint.auditStatus)}',
           _A.accentGreen,
         );
       }
       return _surveyInfoRow(
         Icons.person_search_outlined,
         'Not surveyed yet',
-        'Result: ${_displayResult(checkpoint.result)}',
+        'Audit: ${_displayAuditStatus(checkpoint.auditStatus)}',
         _c.textSecond,
       );
     }
@@ -937,6 +956,23 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
       case '5':
       case 'samplerequired':
         return 'Sample Required';
+      default:
+        return 'Pending';
+    }
+  }
+
+  String _displayAuditStatus(Object? value) {
+    switch (value?.toString().trim().toLowerCase().replaceAll(
+      RegExp(r'[\s_-]'),
+      '',
+    )) {
+      case '2':
+      case 'inprogress':
+        return 'In Progress';
+      case '3':
+      case 'done':
+      case 'completed':
+        return 'Done';
       default:
         return 'Pending';
     }

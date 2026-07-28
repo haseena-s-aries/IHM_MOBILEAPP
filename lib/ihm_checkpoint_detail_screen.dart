@@ -3,6 +3,7 @@ import 'package:Auras/ihm_area.dart';
 import 'package:Auras/screen/screen/ihm_conflict_review_screen.dart';
 import 'package:Auras/service/IhmOfflineService.dart';
 import 'package:Auras/service/api_service.dart';
+import 'package:Auras/service/sync_service.dart';
 import 'package:Auras/utils/app_dialog.dart';
 import 'package:http/http.dart' as http;
 import 'dart:io';
@@ -73,8 +74,9 @@ class IhmCheckpointDetailScreen extends StatefulWidget {
 class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
   late IhmCheckpoint checkpoint;
   late bool isPchm;
-  late String auditResult;
+  late String auditStatus;
   bool _saving = false;
+  bool _isLoggingOut = false;
   late bool _auditSaved;
   late TextEditingController remarks;
   late TextEditingController locationRemarks;
@@ -87,7 +89,7 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
     super.initState();
     checkpoint = widget.checkpoint;
     isPchm = checkpoint.isPchm;
-    auditResult = _normalizeAuditResult(checkpoint.result);
+    auditStatus = _normalizeAuditStatus(checkpoint.auditStatus);
     _auditSaved = checkpoint.isAudited;
     remarks = TextEditingController(text: checkpoint.remarks ?? '');
     locationRemarks = TextEditingController(
@@ -109,7 +111,7 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
       final updated = await IhmOfflineService.saveCheckpointDetails(
         checkpoint: checkpoint,
         isPchm: isPchm,
-        result: auditResult,
+        auditStatus: auditStatus,
         remarks: remarks.text.trim(),
         locationRemarks: locationRemarks.text.trim(),
       );
@@ -117,7 +119,7 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
       setState(() {
         checkpoint = updated;
         isPchm = updated.isPchm;
-        auditResult = _normalizeAuditResult(updated.result);
+        auditStatus = _normalizeAuditStatus(updated.auditStatus);
         _auditSaved = updated.isAudited;
         remarks.text = updated.remarks ?? remarks.text;
         locationRemarks.text = updated.locationRemarks ?? locationRemarks.text;
@@ -161,20 +163,14 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
     }
   }
 
-  String _normalizeAuditResult(String value) {
+  String _normalizeAuditStatus(String value) {
     switch (value.trim().toLowerCase().replaceAll(RegExp(r'[\s_-]'), '')) {
-      case 'present':
+      case 'inprogress':
       case '2':
-        return 'Present';
-      case 'notpresent':
+        return 'InProgress';
+      case 'done':
       case '3':
-        return 'NotPresent';
-      case 'notapplicable':
-      case '4':
-        return 'NotApplicable';
-      case 'samplerequired':
-      case '5':
-        return 'SampleRequired';
+        return 'Done';
       default:
         return 'Pending';
     }
@@ -183,6 +179,18 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
   Future<bool> _returnToAreaScreen() async {
     Navigator.pop(context, checkpoint);
     return false;
+  }
+
+  Future<void> _logout() async {
+    if (_isLoggingOut) return;
+    setState(() => _isLoggingOut = true);
+    try {
+      await SyncService.logoutAndClearUserData();
+    } catch (error) {
+      debugPrint('Logout failed during cleanup: $error');
+    }
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
   @override
@@ -264,6 +272,17 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
                   ),
                 ),
               ),
+              IconButton(
+                icon: _isLoggingOut
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.logout),
+                tooltip: 'Logout',
+                onPressed: _isLoggingOut ? null : _logout,
+              ),
             ],
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(49),
@@ -304,12 +323,12 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
               _DetailsTab(
                 checkpoint: checkpoint,
                 isPchm: isPchm,
-                auditResult: auditResult,
+                auditStatus: auditStatus,
                 auditSaved: _auditSaved,
                 isDark: isDark,
                 onPchmChanged: (v) => setState(() => isPchm = v),
                 onAuditResultChanged: (v) => setState(() {
-                  auditResult = v;
+                  auditStatus = v;
                   _auditSaved = false;
                 }),
                 remarks: remarks,
@@ -329,7 +348,7 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
 class _DetailsTab extends StatelessWidget {
   final IhmCheckpoint checkpoint;
   final bool isPchm;
-  final String auditResult;
+  final String auditStatus;
   final bool auditSaved;
   final bool isDark;
   final ValueChanged<bool> onPchmChanged;
@@ -340,7 +359,7 @@ class _DetailsTab extends StatelessWidget {
   const _DetailsTab({
     required this.checkpoint,
     required this.isPchm,
-    required this.auditResult,
+    required this.auditStatus,
     required this.auditSaved,
     required this.isDark,
     required this.onPchmChanged,
@@ -354,11 +373,11 @@ class _DetailsTab extends StatelessWidget {
   String val(String? x) => x == null || x.trim().isEmpty ? '-' : x.trim();
 
   bool get _isAuditComplete {
-    final value = auditResult.trim().toLowerCase().replaceAll(
+    final value = auditStatus.trim().toLowerCase().replaceAll(
       RegExp(r'[\s_-]'),
       '',
     );
-    return value.isNotEmpty && value != 'pending' && value != '0';
+    return value == 'done' || value == '3' || value == 'completed';
   }
 
   Color get _auditColor {
@@ -374,18 +393,15 @@ class _DetailsTab extends StatelessWidget {
   }
 
   String get _auditDisplayText {
-    switch (auditResult.trim().toLowerCase().replaceAll(
+    switch (auditStatus.trim().toLowerCase().replaceAll(
       RegExp(r'[\s_-]'),
       '',
     )) {
-      case 'present':
-        return 'Present';
-      case 'notpresent':
-        return 'Not Present';
-      case 'notapplicable':
-        return 'Not Applicable';
-      case 'samplerequired':
-        return 'Sample Required';
+      case 'inprogress':
+        return 'In Progress';
+      case 'done':
+      case 'completed':
+        return 'Done';
       default:
         return 'Pending';
     }
@@ -496,7 +512,7 @@ class _DetailsTab extends StatelessWidget {
 
         // ── Audit Results ─────────────────────────────────────────────────
         _sectionLabel('AUDIT RESULTS'),
-        
+
         _infoCard([
           _InfoRow(
             Icons.article_outlined,
@@ -509,9 +525,41 @@ class _DetailsTab extends StatelessWidget {
             val(checkpoint.checkResult),
           ),
         ]),
-        
 
         // ── PCHM & Remarks ────────────────────────────────────────────────
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 18),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _c.bgCard,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _c.divider, width: 1),
+          ),
+          child: DropdownButtonFormField<String>(
+            value: auditStatus,
+            decoration: InputDecoration(
+              labelText: 'Audit Result',
+              labelStyle: TextStyle(color: _c.textSecond),
+              prefixIcon: Icon(
+                Icons.assignment_turned_in_outlined,
+                color: _auditColor,
+              ),
+              border: const OutlineInputBorder(),
+            ),
+            dropdownColor: _c.bgCard,
+            style: TextStyle(color: _c.textPrimary),
+            items: const [
+              DropdownMenuItem(value: 'Pending', child: Text('Pending')),
+              DropdownMenuItem(value: 'InProgress', child: Text('In Progress')),
+              DropdownMenuItem(value: 'Done', child: Text('Done')),
+            ],
+            onChanged: (value) {
+              if (value != null) onAuditResultChanged(value);
+            },
+          ),
+        ),
+
         _sectionLabel('FLAGS & REMARKS'),
         Container(
           margin: const EdgeInsets.only(bottom: 18),
@@ -1349,16 +1397,16 @@ class _ImagesTabState extends State<_ImagesTab> {
   }
 
   String _displayPhotoPath(IhmSamplingPhoto photo) {
-  final edited = photo.appendixThreeEditedFilePath;
-  if (edited != null &&
-      edited.trim().isNotEmpty &&
-      (photo.appendixThreeWidth ?? 0) > 0 &&
-      (photo.appendixThreeHeight ?? 0) > 0) {
-    return edited;
-  }
+    final edited = photo.appendixThreeEditedFilePath;
+    if (edited != null &&
+        edited.trim().isNotEmpty &&
+        (photo.appendixThreeWidth ?? 0) > 0 &&
+        (photo.appendixThreeHeight ?? 0) > 0) {
+      return edited;
+    }
 
-  return photo.filePath;
-}
+    return photo.filePath;
+  }
 
   Future<void> _loadPhotos() async {
     try {
@@ -1387,7 +1435,6 @@ class _ImagesTabState extends State<_ImagesTab> {
       final List<XFile> files;
       if (source == ImageSource.gallery) {
         files = await picker.pickMultiImage(imageQuality: 75);
-
       } else {
         final file = await picker.pickImage(source: source, imageQuality: 75);
         files = file == null ? <XFile>[] : <XFile>[file];
@@ -1424,44 +1471,44 @@ class _ImagesTabState extends State<_ImagesTab> {
     }
   }
 
-Future<void> _toggleAppendixThree(IhmSamplingPhoto photo) async {
-  final selectedIds = photos
-      .where((x) => x.showInAppendixThree)
-      .map((x) => x.id)
-      .toList();
+  Future<void> _toggleAppendixThree(IhmSamplingPhoto photo) async {
+    final selectedIds = photos
+        .where((x) => x.showInAppendixThree)
+        .map((x) => x.id)
+        .toList();
 
-  if (selectedIds.contains(photo.id)) {
-    selectedIds.remove(photo.id);
-  } else {
-    if (selectedIds.length >= 2) {
-      await AppDialog.error(
-        context,
-        title: 'Limit exceeded',
-        message: 'Only 2 images can be selected for Appendix 3.',
-      );
-      return;
+    if (selectedIds.contains(photo.id)) {
+      selectedIds.remove(photo.id);
+    } else {
+      if (selectedIds.length >= 2) {
+        await AppDialog.error(
+          context,
+          title: 'Limit exceeded',
+          message: 'Only 2 images can be selected for Appendix 3.',
+        );
+        return;
+      }
+      selectedIds.add(photo.id);
     }
-    selectedIds.add(photo.id);
+
+    final updated = await ApiService.saveAppendixThreeSelection(
+      checkpointId: widget.checkpoint.id,
+      photoIds: selectedIds,
+    );
+
+    if (!mounted) return;
+    setState(() => photos = updated);
   }
 
-  final updated = await ApiService.saveAppendixThreeSelection(
-    checkpointId: widget.checkpoint.id,
-    photoIds: selectedIds,
-  );
+  Future<void> _editAppendixThreeImage(IhmSamplingPhoto photo) async {
+    final saved = await ApiService.rotateAppendixThreeImage(photoId: photo.id);
 
-  if (!mounted) return;
-  setState(() => photos = updated);
-}
-
-Future<void> _editAppendixThreeImage(IhmSamplingPhoto photo) async {
-  final saved = await ApiService.rotateAppendixThreeImage(photoId: photo.id);
-
-  if (!mounted) return;
-  setState(() {
-    final index = photos.indexWhere((x) => x.id == saved.id);
-    if (index >= 0) photos[index] = saved;
-  });
-}
+    if (!mounted) return;
+    setState(() {
+      final index = photos.indexWhere((x) => x.id == saved.id);
+      if (index >= 0) photos[index] = saved;
+    });
+  }
 
   void _showImageOptions() {
     showModalBottomSheet(
@@ -1529,37 +1576,37 @@ Future<void> _editAppendixThreeImage(IhmSamplingPhoto photo) async {
     }
   }
 
-Widget _buildPhotoImage(IhmSamplingPhoto photo) {
-  final imageWidget = () {
-    final localPath = photo.localFilePath;
+  Widget _buildPhotoImage(IhmSamplingPhoto photo) {
+    final imageWidget = () {
+      final localPath = photo.localFilePath;
 
-    if (localPath != null && localPath.isNotEmpty) {
-      return Image.file(
-        File(localPath),
+      if (localPath != null && localPath.isNotEmpty) {
+        return Image.file(
+          File(localPath),
+          width: double.infinity,
+          height: double.infinity,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => _brokenPhoto(),
+        );
+      }
+
+      return Image.network(
+        ApiService.fileUrl(_displayPhotoPath(photo)),
         width: double.infinity,
         height: double.infinity,
         fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => _brokenPhoto(),
+        errorBuilder: (_, __, ___) => _offlinePhotoPlaceholder(),
       );
-    }
+    }();
 
-    return Image.network(
-      ApiService.fileUrl(_displayPhotoPath(photo)),
+    return Container(
       width: double.infinity,
       height: double.infinity,
-      fit: BoxFit.contain,
-      errorBuilder: (_, __, ___) => _offlinePhotoPlaceholder(),
+      color: _c.bgCardAlt,
+      alignment: Alignment.center,
+      child: imageWidget,
     );
-  }();
-
-  return Container(
-    width: double.infinity,
-    height: double.infinity,
-    color: _c.bgCardAlt,
-    alignment: Alignment.center,
-    child: imageWidget,
-  );
-}
+  }
 
   Widget _brokenPhoto() {
     return Container(
@@ -1619,108 +1666,107 @@ Widget _buildPhotoImage(IhmSamplingPhoto photo) {
               : GridView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                      childAspectRatio: 1.05,
-                    ),
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    childAspectRatio: 1.05,
+                  ),
                   itemCount: photos.length,
                   itemBuilder: (context, index) {
                     final photo = photos[index];
                     final selected = photo.showInAppendixThree == true;
-                   
 
                     return Container(
-                            decoration: BoxDecoration(
+                      decoration: BoxDecoration(
+                        color: _c.bgCardAlt,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: _c.divider),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Positioned.fill(
+                            child: Container(
                               color: _c.bgCardAlt,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: _c.divider),
+                              alignment: Alignment.center,
+                              child: _buildPhotoImage(photo),
                             ),
-                            clipBehavior: Clip.antiAlias,
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                Positioned.fill(
-                                  child: Container(
-                                    color: _c.bgCardAlt,
-                                    alignment: Alignment.center,
-                                    child: _buildPhotoImage(photo),
-                                  ),
-                                ),
+                          ),
 
-                                Positioned(
-                                  left: 8,
-                                  top: 8,
-                                  child: Material(
-                                    color: Colors.black.withOpacity(0.58),
-                                    shape: const CircleBorder(),
-                                    child: InkWell(
-                                      customBorder: const CircleBorder(),
-                                      onTap: () => _toggleAppendixThree(photo),
-                                      child: SizedBox(
-                                        width: 38,
-                                        height: 38,
-                                        child: Center(
-                                          child: Checkbox(
-                                            value: selected,
-                                            visualDensity: VisualDensity.compact,
-                                            materialTapTargetSize:
-                                                MaterialTapTargetSize.shrinkWrap,
-                                            activeColor: _A.accent,
-                                            checkColor: Colors.white,
-                                            side: const BorderSide(
-                                              color: Colors.white,
-                                              width: 2,
-                                            ),
-                                            onChanged: (_) =>
-                                                _toggleAppendixThree(photo),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-
-                                if (selected)
-                                  Positioned(
-                                    left: 8,
-                                    bottom: 8,
-                                    child: Material(
-                                      color: Colors.black.withOpacity(0.62),
-                                      shape: const CircleBorder(),
-                                      child: IconButton(
-                                        tooltip: 'Rotate image',
-                                        icon: const Icon(
-                                          Icons.rotate_right,
-                                          color: Colors.white,
-                                          size: 21,
-                                        ),
-                                        onPressed: () =>
-                                            _editAppendixThreeImage(photo),
-                                      ),
-                                    ),
-                                  ),
-
-                                Positioned(
-                                  top: 6,
-                                  right: 6,
-                                  child: Material(
-                                    color: Colors.black.withOpacity(0.58),
-                                    shape: const CircleBorder(),
-                                    child: IconButton(
-                                      tooltip: 'Delete image',
-                                      icon: const Icon(
-                                        Icons.delete,
+                          Positioned(
+                            left: 8,
+                            top: 8,
+                            child: Material(
+                              color: Colors.black.withOpacity(0.58),
+                              shape: const CircleBorder(),
+                              child: InkWell(
+                                customBorder: const CircleBorder(),
+                                onTap: () => _toggleAppendixThree(photo),
+                                child: SizedBox(
+                                  width: 38,
+                                  height: 38,
+                                  child: Center(
+                                    child: Checkbox(
+                                      value: selected,
+                                      visualDensity: VisualDensity.compact,
+                                      materialTapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                      activeColor: _A.accent,
+                                      checkColor: Colors.white,
+                                      side: const BorderSide(
                                         color: Colors.white,
-                                        size: 19,
+                                        width: 2,
                                       ),
-                                      onPressed: () => _deletePhoto(photo),
+                                      onChanged: (_) =>
+                                          _toggleAppendixThree(photo),
                                     ),
                                   ),
                                 ),
-                              ],
+                              ),
                             ),
-                          );
+                          ),
+
+                          if (selected)
+                            Positioned(
+                              left: 8,
+                              bottom: 8,
+                              child: Material(
+                                color: Colors.black.withOpacity(0.62),
+                                shape: const CircleBorder(),
+                                child: IconButton(
+                                  tooltip: 'Rotate image',
+                                  icon: const Icon(
+                                    Icons.rotate_right,
+                                    color: Colors.white,
+                                    size: 21,
+                                  ),
+                                  onPressed: () =>
+                                      _editAppendixThreeImage(photo),
+                                ),
+                              ),
+                            ),
+
+                          Positioned(
+                            top: 6,
+                            right: 6,
+                            child: Material(
+                              color: Colors.black.withOpacity(0.58),
+                              shape: const CircleBorder(),
+                              child: IconButton(
+                                tooltip: 'Delete image',
+                                icon: const Icon(
+                                  Icons.delete,
+                                  color: Colors.white,
+                                  size: 19,
+                                ),
+                                onPressed: () => _deletePhoto(photo),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
                   },
                 ),
         ),

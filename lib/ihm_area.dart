@@ -51,6 +51,7 @@ class IhmCheckpoint {
   final String? visualCheck;
   final String? checkResult;
   final String result;
+  final String auditStatus;
   final String? remarks;
   final String? documentAnalysisResult;
   final String? description;
@@ -77,6 +78,7 @@ class IhmCheckpoint {
     this.visualCheck,
     this.checkResult,
     this.result = 'Pending',
+    this.auditStatus = 'Pending',
     this.remarks,
     this.description,
     this.tableType,
@@ -110,6 +112,10 @@ class IhmCheckpoint {
       checkResult:
           json['checkResult']?.toString() ?? json['result']?.toString(),
       result: json['result']?.toString() ?? 'Pending',
+      auditStatus:
+          json['auditStatus']?.toString() ??
+          json['AuditStatus']?.toString() ??
+          'Pending',
       remarks: json['remarks']?.toString(),
       documentAnalysisResult: json['documentAnalysisResult']?.toString(),
       description: json['description']?.toString(),
@@ -147,6 +153,7 @@ class IhmCheckpoint {
     'visualCheck': visualCheck,
     'checkResult': checkResult,
     'result': result,
+    'auditStatus': auditStatus,
     'remarks': remarks,
     'documentAnalysisResult': documentAnalysisResult,
     'isPchm': isPchm ? 1 : 0,
@@ -166,8 +173,8 @@ class IhmCheckpoint {
   }
 
   bool get isAudited {
-    final value = result.trim().toLowerCase().replaceAll(RegExp(r'[\s_-]'), '');
-    return value.isNotEmpty && value != 'pending' && value != '0';
+    final value = auditStatus.trim().toLowerCase().replaceAll(RegExp(r'[\s_-]'), '');
+    return value == 'done' || value == '3' || value == 'completed';
   }
 
   String get procedureType {
@@ -192,6 +199,7 @@ class IhmCheckpoint {
     String? visualCheck,
     String? checkResult,
     String? result,
+    String? auditStatus,
     String? remarks,
     String? documentAnalysisResult,
     String? description,
@@ -214,6 +222,7 @@ class IhmCheckpoint {
     visualCheck: visualCheck ?? this.visualCheck,
     checkResult: checkResult ?? this.checkResult,
     result: result ?? this.result,
+    auditStatus: auditStatus ?? this.auditStatus,
     remarks: remarks ?? this.remarks,
     documentAnalysisResult:
         documentAnalysisResult ?? this.documentAnalysisResult,

@@ -204,20 +204,20 @@ class IhmOfflineService {
   static Future<IhmCheckpoint> saveCheckpointDetails({
     required IhmCheckpoint checkpoint,
     required bool isPchm,
-    required String result,
+    required String auditStatus,
     required String remarks,
     required String locationRemarks,
   }) async {
     final updatedCheckpoint = checkpoint.copyWith(
       isPchm: isPchm,
-      result: result,
+      auditStatus: auditStatus,
       remarks: remarks,
       locationRemarks: locationRemarks,
     );
 
     debugPrint(
       '[IHM] local save request checkpoint ${checkpoint.id}: '
-      'result=$result, isPchm=$isPchm',
+      'auditStatus=$auditStatus, isPchm=$isPchm',
     );
 
     if (kIsWeb) {
@@ -238,7 +238,7 @@ class IhmOfflineService {
         );
         debugPrint(
           '[IHM] checkpoint ${checkpoint.id} saved online and cached: '
-          'result=${saved.result}',
+          'auditStatus=${saved.auditStatus}',
         );
         return saved;
       } catch (error) {
@@ -256,7 +256,7 @@ class IhmOfflineService {
       'ihm_checkpoints',
       {
         'isPchm': isPchm ? 1 : 0,
-        'result': result,
+        'auditStatus': auditStatus,
         'remarks': remarks,
         'locationRemarks': locationRemarks,
         'synced': 0,
@@ -276,7 +276,7 @@ class IhmOfflineService {
       payload: {
         'checkpointId': checkpoint.id,
         'isPchm': isPchm,
-        'result': result,
+        'auditStatus': auditStatus,
         'remarks': remarks,
         'locationRemarks': locationRemarks,
       },
@@ -305,7 +305,7 @@ class IhmOfflineService {
         );
         debugPrint(
           '[IHM] full checkpoint ${checkpoint.id} saved online and cached: '
-          'result=${saved.result}',
+          'auditStatus=${saved.auditStatus}',
         );
         return saved;
       } catch (error) {
@@ -1278,6 +1278,7 @@ final existing = existingRows
       'visualCheck': row['visualCheck'],
       'checkResult': row['checkResult'],
       'result': row['result'],
+      'auditStatus': row['auditStatus'],
       'remarks': row['remarks'],
       'documentAnalysisResult': row['documentAnalysisResult'],
       'quantityUnitKg': row['quantityUnitKg'],

@@ -392,16 +392,14 @@ class SurveyJobOfflineService {
   ) async {
     final rows = await db.query(
       'ihm_checkpoints',
-      columns: ['result', 'checkResult'],
+      columns: ['auditStatus'],
       where: 'surveyJobId = ?',
       whereArgs: [jobId],
     );
     final totalItems = rows.length;
     final completedItems = rows
         .where(
-          (row) =>
-              _isCompletedAuditValue(row['result']?.toString()) ||
-              _isCompletedAuditValue(row['checkResult']?.toString()),
+          (row) => _isCompletedAuditValue(row['auditStatus']?.toString()),
         )
         .length;
 
@@ -438,14 +436,8 @@ class SurveyJobOfflineService {
         .replaceAll('_', '')
         .replaceAll('-', '');
     return {
-      'present',
-      'notpresent',
-      'notapplicable',
-      'samplerequired',
-      '2',
+      'done',
       '3',
-      '4',
-      '5',
       'audited',
       'completed',
     }.contains(normalized);

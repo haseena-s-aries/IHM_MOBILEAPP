@@ -29,7 +29,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -200,6 +200,15 @@ class DatabaseHelper {
     if (oldVersion < 8) {
       await _createSyncMetadataTables(db);
     }
+
+    if (oldVersion < 9) {
+      await _addColumnIfMissing(
+        db,
+        tableName: 'ihm_checkpoints',
+        columnName: 'auditStatus',
+        definition: "TEXT DEFAULT 'Pending'",
+      );
+    }
   }
 
   Future<void> _addColumnIfMissing(
@@ -316,6 +325,7 @@ class DatabaseHelper {
         visualCheck TEXT,
         checkResult TEXT,
         result TEXT,
+        auditStatus TEXT DEFAULT 'Pending',
         remarks TEXT,
         isPchm INTEGER DEFAULT 0,
         locationRemarks TEXT,

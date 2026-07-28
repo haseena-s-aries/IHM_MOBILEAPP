@@ -2124,6 +2124,7 @@ static Future<List<Map<String, dynamic>>> fetchReportRemarks() async {
     'visualCheck': checkpoint.visualCheck,
     'checkResult': checkpoint.checkResult,
     'result': _checkpointResultValue(checkpoint.result),
+    'auditStatus': _checkpointAuditStatusValue(checkpoint.auditStatus),
     'isPchm': checkpoint.isPchm,
     'remarks': checkpoint.remarks,
     'locationRemarks': checkpoint.locationRemarks,
@@ -2139,6 +2140,18 @@ static Future<List<Map<String, dynamic>>> fetchReportRemarks() async {
         return 4;
       case 'samplerequired':
         return 5;
+      default:
+        return 1;
+    }
+  }
+
+  static int _checkpointAuditStatusValue(String status) {
+    switch (status.trim().toLowerCase().replaceAll(RegExp(r'[\s_-]'), '')) {
+      case 'inprogress':
+        return 2;
+      case 'done':
+      case 'completed':
+        return 3;
       default:
         return 1;
     }
