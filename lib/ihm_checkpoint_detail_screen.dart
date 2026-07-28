@@ -4,6 +4,7 @@ import 'package:Auras/screen/screen/ihm_conflict_review_screen.dart';
 import 'package:Auras/service/IhmOfflineService.dart';
 import 'package:Auras/service/api_service.dart';
 import 'package:Auras/utils/app_dialog.dart';
+import 'package:Auras/service/sync_service.dart';
 import 'package:http/http.dart' as http;
 import 'dart:io';
 import 'dart:typed_data';
@@ -73,8 +74,10 @@ class IhmCheckpointDetailScreen extends StatefulWidget {
 class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
   late IhmCheckpoint checkpoint;
   late bool isPchm;
-  late String auditResult;
+   late String auditStatus;
   bool _saving = false;
+  bool _isLoggingOut = false;
+
   late bool _auditSaved;
   late TextEditingController remarks;
   late TextEditingController locationRemarks;
@@ -87,7 +90,7 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
     super.initState();
     checkpoint = widget.checkpoint;
     isPchm = checkpoint.isPchm;
-    auditResult = _normalizeAuditResult(checkpoint.result);
+    auditStatus = _normalizeAuditStatus(checkpoint.auditStatus);
     _auditSaved = checkpoint.isAudited;
     remarks = TextEditingController(text: checkpoint.remarks ?? '');
     locationRemarks = TextEditingController(
@@ -109,7 +112,7 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
       final updated = await IhmOfflineService.saveCheckpointDetails(
         checkpoint: checkpoint,
         isPchm: isPchm,
-        result: auditResult,
+        auditStatus: auditStatus,
         remarks: remarks.text.trim(),
         locationRemarks: locationRemarks.text.trim(),
       );
@@ -117,7 +120,7 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
       setState(() {
         checkpoint = updated;
         isPchm = updated.isPchm;
-        auditResult = _normalizeAuditResult(updated.result);
+        auditStatus = _normalizeAuditStatus(updated.auditStatus);
         _auditSaved = updated.isAudited;
         remarks.text = updated.remarks ?? remarks.text;
         locationRemarks.text = updated.locationRemarks ?? locationRemarks.text;
@@ -161,23 +164,29 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
     }
   }
 
-  String _normalizeAuditResult(String value) {
+    String _normalizeAuditStatus(String value) {
     switch (value.trim().toLowerCase().replaceAll(RegExp(r'[\s_-]'), '')) {
-      case 'present':
+      case 'inprogress':
       case '2':
-        return 'Present';
-      case 'notpresent':
+        return 'InProgress';
+      case 'done':
       case '3':
-        return 'NotPresent';
-      case 'notapplicable':
-      case '4':
-        return 'NotApplicable';
-      case 'samplerequired':
-      case '5':
-        return 'SampleRequired';
+        return 'Done';
       default:
         return 'Pending';
     }
+  }
+
+    Future<void> _logout() async {
+    if (_isLoggingOut) return;
+    setState(() => _isLoggingOut = true);
+    try {
+      await SyncService.logoutAndClearUserData();
+    } catch (error) {
+      debugPrint('Logout failed during cleanup: $error');
+    }
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
   Future<bool> _returnToAreaScreen() async {
@@ -188,7 +197,7 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = context.watch<ThemeNotifier>().isDarkMode;
-
+ 
     return WillPopScope(
       onWillPop: _returnToAreaScreen,
       child: DefaultTabController(
@@ -264,6 +273,17 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
                   ),
                 ),
               ),
+              IconButton(
+                icon: _isLoggingOut
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.logout),
+                tooltip: 'Logout',
+                onPressed: _isLoggingOut ? null : _logout,
+              ),
             ],
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(49),
@@ -299,18 +319,17 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
               ),
             ),
           ),
-          body:  TabBarView(
-              physics:const NeverScrollableScrollPhysics(),
+          body: TabBarView(
             children: [
               _DetailsTab(
                 checkpoint: checkpoint,
                 isPchm: isPchm,
-                auditResult: auditResult,
+                auditStatus: auditStatus,
                 auditSaved: _auditSaved,
                 isDark: isDark,
                 onPchmChanged: (v) => setState(() => isPchm = v),
                 onAuditResultChanged: (v) => setState(() {
-                  auditResult = v;
+                  auditStatus = v;
                   _auditSaved = false;
                 }),
                 remarks: remarks,
@@ -326,11 +345,12 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
   }
 }
 
+
 // ─── Details Tab ──────────────────────────────────────────────────────────────
 class _DetailsTab extends StatelessWidget {
   final IhmCheckpoint checkpoint;
   final bool isPchm;
-  final String auditResult;
+    final String auditStatus;
   final bool auditSaved;
   final bool isDark;
   final ValueChanged<bool> onPchmChanged;
@@ -341,7 +361,8 @@ class _DetailsTab extends StatelessWidget {
   const _DetailsTab({
     required this.checkpoint,
     required this.isPchm,
-    required this.auditResult,
+        required this.auditStatus,
+ 
     required this.auditSaved,
     required this.isDark,
     required this.onPchmChanged,
@@ -354,12 +375,12 @@ class _DetailsTab extends StatelessWidget {
 
   String val(String? x) => x == null || x.trim().isEmpty ? '-' : x.trim();
 
-  bool get _isAuditComplete {
-    final value = auditResult.trim().toLowerCase().replaceAll(
+   bool get _isAuditComplete {
+    final value = auditStatus.trim().toLowerCase().replaceAll(
       RegExp(r'[\s_-]'),
       '',
     );
-    return value.isNotEmpty && value != 'pending' && value != '0';
+    return value == 'done' || value == '3' || value == 'completed';
   }
 
   Color get _auditColor {
@@ -375,18 +396,15 @@ class _DetailsTab extends StatelessWidget {
   }
 
   String get _auditDisplayText {
-    switch (auditResult.trim().toLowerCase().replaceAll(
+    switch (auditStatus.trim().toLowerCase().replaceAll(
       RegExp(r'[\s_-]'),
       '',
     )) {
-      case 'present':
-        return 'Present';
-      case 'notpresent':
-        return 'Not Present';
-      case 'notapplicable':
-        return 'Not Applicable';
-      case 'samplerequired':
-        return 'Sample Required';
+      case 'inprogress':
+        return 'In Progress';
+      case 'done':
+      case 'completed':
+        return 'Done';
       default:
         return 'Pending';
     }
@@ -511,7 +529,38 @@ class _DetailsTab extends StatelessWidget {
           ),
         ]),
         
-
+         Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 18),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _c.bgCard,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _c.divider, width: 1),
+          ),
+          child: DropdownButtonFormField<String>(
+            value: auditStatus,
+            decoration: InputDecoration(
+              labelText: 'Audit Result',
+              labelStyle: TextStyle(color: _c.textSecond),
+              prefixIcon: Icon(
+                Icons.assignment_turned_in_outlined,
+                color: _auditColor,
+              ),
+              border: const OutlineInputBorder(),
+            ),
+            dropdownColor: _c.bgCard,
+            style: TextStyle(color: _c.textPrimary),
+            items: const [
+              DropdownMenuItem(value: 'Pending', child: Text('Pending')),
+              DropdownMenuItem(value: 'InProgress', child: Text('In Progress')),
+              DropdownMenuItem(value: 'Done', child: Text('Done')),
+            ],
+            onChanged: (value) {
+              if (value != null) onAuditResultChanged(value);
+            },
+          ),
+        ),
         // ── PCHM & Remarks ────────────────────────────────────────────────
         _sectionLabel('FLAGS & REMARKS'),
         Container(
