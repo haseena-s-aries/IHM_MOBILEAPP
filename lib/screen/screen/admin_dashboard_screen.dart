@@ -2056,23 +2056,31 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     ),
                   ];
 
-                if (constraints.maxWidth < 430) {
-                    return Column(
-                      children: [
-                        cards[0],
-                        const SizedBox(height: 12),
-                        cards[1],
-                      ],
-                    );
-                  }
-
-                  return Row(
+                // Mobile -> Show one card per row
+                if (MediaQuery.of(context).size.width < 600) {
+                  return Column(
                     children: [
-                      Expanded(child: cards[0]),
-                      const SizedBox(width: 12),
-                      Expanded(child: cards[1]),
+                      SizedBox(
+                        width: double.infinity,
+                        child: cards[0],
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: cards[1],
+                      ),
                     ],
                   );
+                }
+
+                // Tablet/Desktop -> Show two cards in a row
+                return Row(
+                  children: [
+                    Expanded(child: cards[0]),
+                    const SizedBox(width: 12),
+                    Expanded(child: cards[1]),
+                  ],
+                );
               },
             ),
             const SizedBox(height: 24),
@@ -2247,7 +2255,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     required String subtitle,
     required Color color,
   }) {
-    return Material(
+   return SizedBox(
+  width: double.infinity,
+  child: Material( 
       color: Colors.white,
       elevation: 2,
       shadowColor: Colors.black.withOpacity(0.08),
@@ -2313,6 +2323,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ),
         ),
       ),
+  ),
     );
   }
 
