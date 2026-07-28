@@ -5,6 +5,7 @@ import 'package:Auras/service/IhmOfflineService.dart';
 import 'package:Auras/service/api_service.dart';
 import 'package:Auras/service/sync_service.dart';
 import 'package:Auras/utils/app_dialog.dart';
+import 'package:Auras/service/sync_service.dart';
 import 'package:http/http.dart' as http;
 import 'dart:io';
 import 'dart:typed_data';
@@ -176,11 +177,6 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
     }
   }
 
-  Future<bool> _returnToAreaScreen() async {
-    Navigator.pop(context, checkpoint);
-    return false;
-  }
-
   Future<void> _logout() async {
     if (_isLoggingOut) return;
     setState(() => _isLoggingOut = true);
@@ -191,6 +187,11 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
     }
     if (!mounted) return;
     Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+  }
+
+  Future<bool> _returnToAreaScreen() async {
+    Navigator.pop(context, checkpoint);
+    return false;
   }
 
   @override
@@ -360,6 +361,7 @@ class _DetailsTab extends StatelessWidget {
     required this.checkpoint,
     required this.isPchm,
     required this.auditStatus,
+
     required this.auditSaved,
     required this.isDark,
     required this.onPchmChanged,
@@ -526,6 +528,38 @@ class _DetailsTab extends StatelessWidget {
           ),
         ]),
 
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 18),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _c.bgCard,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _c.divider, width: 1),
+          ),
+          child: DropdownButtonFormField<String>(
+            value: auditStatus,
+            decoration: InputDecoration(
+              labelText: 'Audit Result',
+              labelStyle: TextStyle(color: _c.textSecond),
+              prefixIcon: Icon(
+                Icons.assignment_turned_in_outlined,
+                color: _auditColor,
+              ),
+              border: const OutlineInputBorder(),
+            ),
+            dropdownColor: _c.bgCard,
+            style: TextStyle(color: _c.textPrimary),
+            items: const [
+              DropdownMenuItem(value: 'Pending', child: Text('Pending')),
+              DropdownMenuItem(value: 'InProgress', child: Text('In Progress')),
+              DropdownMenuItem(value: 'Done', child: Text('Done')),
+            ],
+            onChanged: (value) {
+              if (value != null) onAuditResultChanged(value);
+            },
+          ),
+        ),
         // ── PCHM & Remarks ────────────────────────────────────────────────
         Container(
           width: double.infinity,
@@ -705,11 +739,24 @@ class _AreaTabState extends State<_AreaTab> {
   List<IhmMarker> markers = [];
   bool loading = true;
   bool savingMarker = false;
+
   String? layoutError;
   int _loadSeq = 0;
   final TransformationController _controller = TransformationController();
   final GlobalKey _layoutImageKey = GlobalKey();
   Size? _layoutImageSize;
+  static const double _mobilePinWidth = 48;
+  static const double _mobilePinHeight = 46;
+  static const double _desktopPinWidth = 72;
+  static const double _desktopPinHeight = 64;
+
+  bool get _isMobileMap {
+    final shortestSide = MediaQuery.of(context).size.shortestSide;
+    return shortestSide < 600;
+  }
+
+  double get _pinWidth => _isMobileMap ? _mobilePinWidth : _desktopPinWidth;
+  double get _pinHeight => _isMobileMap ? _mobilePinHeight : _desktopPinHeight;
 
   double get mapWidth => _layoutImageSize?.width ?? 1400;
   double get mapHeight => _layoutImageSize?.height ?? 990;
@@ -1105,153 +1152,197 @@ class _AreaTabState extends State<_AreaTab> {
       );
     }
 
-    return Stack(
-      children: [
-        Center(
-          child: InteractiveViewer(
-            transformationController: _controller,
-            minScale: 0.5,
-            maxScale: 5,
-            boundaryMargin: const EdgeInsets.all(300),
-            child: SizedBox(
-              key: _layoutImageKey,
-              width: mapWidth,
-              height: mapHeight,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final widgetSize = Size(
-                    constraints.maxWidth,
-                    constraints.maxHeight,
-                  );
-                  final imageSize =
-                      _layoutImageSize ?? Size(mapWidth, mapHeight);
-                  final imageRect = getFittedImageRect(
-                    containerSize: widgetSize,
-                    imageSize: imageSize,
-                    fit: BoxFit.contain,
-                  );
+    return ClipRect(
+      child: InteractiveViewer(
+        transformationController: _controller,
+        minScale: 0.25,
+        maxScale: 8,
+        panEnabled: true,
+        scaleEnabled: true,
+        constrained: false,
+        boundaryMargin: const EdgeInsets.all(10000),
+        interactionEndFrictionCoefficient: 0.000008,
+        panAxis: PanAxis.free,
+        child: SizedBox(
+          key: _layoutImageKey,
+          width: mapWidth,
+          height: mapHeight,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final widgetSize = Size(
+                constraints.maxWidth,
+                constraints.maxHeight,
+              );
 
-                  return GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTapUp: _saveMarker,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Positioned.fill(
-                          child: Image(
-                            image: _layoutImageProvider(imagePath!),
-                            fit: BoxFit.contain,
-                            errorBuilder: (_, error, __) => Container(
-                              color: _c.bgCardAlt,
-                              alignment: Alignment.center,
-                              padding: const EdgeInsets.all(24),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(
-                                    Icons.broken_image_outlined,
-                                    color: _A.accentRed,
-                                    size: 42,
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Text(
-                                    'Attachment found, but the image could not be opened.',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: _c.textPrimary,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    _localLayoutPath(imagePath!) ??
-                                        ApiService.fileUrl(imagePath!),
-                                    textAlign: TextAlign.center,
-                                    maxLines: 3,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: _c.textSecond,
-                                      fontSize: 10,
-                                    ),
-                                  ),
-                                ],
+              final imageSize = _layoutImageSize ?? Size(mapWidth, mapHeight);
+
+              final imageRect = getFittedImageRect(
+                containerSize: widgetSize,
+                imageSize: imageSize,
+                fit: BoxFit.contain,
+              );
+
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapUp: _saveMarker,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned.fill(
+                      child: Image(
+                        image: _layoutImageProvider(imagePath!),
+                        fit: BoxFit.contain,
+                        filterQuality: FilterQuality.medium,
+                        isAntiAlias: true,
+                        errorBuilder: (_, error, __) => Container(
+                          color: _c.bgCardAlt,
+                          alignment: Alignment.center,
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.broken_image_outlined,
+                                color: _A.accentRed,
+                                size: 42,
                               ),
+                              const SizedBox(height: 10),
+                              Text(
+                                'Attachment found, but the image could not be opened.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: _c.textPrimary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                _localLayoutPath(imagePath!) ??
+                                    ApiService.fileUrl(imagePath!),
+                                textAlign: TextAlign.center,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: _c.textSecond,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    for (final marker in _visibleMarkers)
+                      Builder(
+                        builder: (context) {
+                          final pinWidth = _isMobileMap ? 48.0 : 72.0;
+                          final pinHeight = _isMobileMap ? 46.0 : 64.0;
+
+                          final point = Offset(
+                            imageRect.left +
+                                (_storedPercentToUnit(marker.xPercent) *
+                                    imageRect.width),
+                            imageRect.top +
+                                (_storedPercentToUnit(marker.yPercent) *
+                                    imageRect.height),
+                          );
+
+                          return Positioned(
+                            left: point.dx - (pinWidth / 2),
+                            top: point.dy - pinHeight,
+                            width: pinWidth,
+                            height: pinHeight,
+                            child: AnimatedBuilder(
+                              animation: _controller,
+                              builder: (context, child) {
+                                final scale = _controller.value
+                                    .getMaxScaleOnAxis();
+                                final markerScale = scale <= 0
+                                    ? 1.0
+                                    : (1.0 / scale);
+
+                                return Transform.scale(
+                                  scale: markerScale,
+                                  alignment: Alignment.bottomCenter,
+                                  child: child,
+                                );
+                              },
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTapUp: (_) {},
+                                onDoubleTap: () async {
+                                  await _deleteMarker(marker);
+                                },
+                                child: _GooglePin(
+                                  label: marker.markerLabel ?? '',
+                                  active:
+                                      marker.ihmCheckpointId ==
+                                      widget.checkpoint.id,
+                                  compact: _isMobileMap,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+
+                    if (savingMarker)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: Container(
+                            color: Colors.black.withOpacity(0.12),
+                            alignment: Alignment.center,
+                            child: const CircularProgressIndicator(
+                              color: _A.accent,
                             ),
                           ),
                         ),
-                        for (final marker in _visibleMarkers)
-                          Positioned(
-                            left:
-                                imageRect.left +
-                                (_storedPercentToUnit(marker.xPercent) *
-                                    imageRect.width) -
-                                36,
-                            top:
-                                imageRect.top +
-                                (_storedPercentToUnit(marker.yPercent) *
-                                    imageRect.height) -
-                                64,
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.deferToChild,
-                              onTapUp: (_) {},
-                              onDoubleTap: () async {
-                                await _deleteMarker(marker);
-                              },
-                              child: _GooglePin(
-                                label: marker.markerLabel ?? '',
-                                active:
-                                    marker.ihmCheckpointId ==
-                                    widget.checkpoint.id,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        ),
-        if (savingMarker)
-          Positioned.fill(
-            child: IgnorePointer(
-              child: Container(
-                color: Colors.black.withOpacity(0.12),
-                alignment: Alignment.center,
-                child: const CircularProgressIndicator(color: _A.accent),
-              ),
-            ),
-          ),
+                      ),
 
-        // ── Hint overlay ──────────────────────────────────────────────────
-        Positioned(
-          bottom: 16,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: _c.bgCard.withOpacity(0.92),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: _c.divider, width: 1),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.touch_app_rounded, color: _c.textSecond, size: 14),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Tap to add · Double-tap pin to remove',
-                    style: TextStyle(color: _c.textSecond, fontSize: 11),
-                  ),
-                ],
-              ),
-            ),
+                    Positioned(
+                      bottom: 16,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _c.bgCard.withOpacity(0.92),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: _c.divider, width: 1),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.touch_app_rounded,
+                                color: _c.textSecond,
+                                size: 14,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Tap to add · Double-tap pin to remove',
+                                style: TextStyle(
+                                  color: _c.textSecond,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
         ),
-      ],
+      ),
     );
   }
 
@@ -1779,26 +1870,34 @@ class _ImagesTabState extends State<_ImagesTab> {
 class _GooglePin extends StatelessWidget {
   final String label;
   final bool active;
+  final bool compact;
 
-  const _GooglePin({required this.label, required this.active});
+  const _GooglePin({
+    required this.label,
+    required this.active,
+    this.compact = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     final color = active ? _A.accentBlue : _A.accentRed;
 
     return SizedBox(
-      width: 72,
-      height: 64,
+      width: compact ? 48 : 72,
+      height: compact ? 46 : 64,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            constraints: const BoxConstraints(
-              minWidth: 34,
-              maxWidth: 68,
-              minHeight: 24,
+            constraints: BoxConstraints(
+              minWidth: compact ? 24 : 34,
+              maxWidth: compact ? 44 : 68,
+              minHeight: compact ? 18 : 24,
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 5 : 7,
+              vertical: compact ? 2 : 4,
+            ),
             decoration: BoxDecoration(
               color: color,
               borderRadius: BorderRadius.circular(14),
@@ -1816,15 +1915,15 @@ class _GooglePin extends StatelessWidget {
               child: Text(
                 label.isEmpty ? '-' : label,
                 maxLines: 1,
-                style: const TextStyle(
+                style: TextStyle(
                   color: Colors.white,
-                  fontSize: 12,
+                  fontSize: compact ? 9 : 12,
                   fontWeight: FontWeight.w800,
                 ),
               ),
             ),
           ),
-          Icon(Icons.location_pin, color: color, size: 32),
+          Icon(Icons.location_pin, color: color, size: compact ? 24 : 32),
         ],
       ),
     );
