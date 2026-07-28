@@ -488,7 +488,6 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
       ),
     };
     var procedure = checkpoint.isSample ? 'Sample' : 'Visual';
-    var auditStatus = checkpoint.auditStatus;
     var isPchm = checkpoint.isPchm;
 
     final updated = await showDialog<IhmCheckpoint>(
@@ -522,24 +521,6 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
                   _editField(fields['manufacturer']!, 'Manufacturer / Brand'),
                   _editField(fields['documentResult']!, 'Document Analysis Result'),
                   _editField(fields['checkResult']!, 'Check Result'),
-                  DropdownButtonFormField<String>(
-                    value: auditStatus,
-                    decoration: const InputDecoration(labelText: 'Audit Result'),
-                    items: const [
-                      DropdownMenuItem(value: 'Pending', child: Text('Pending')),
-                      DropdownMenuItem(
-                        value: 'InProgress',
-                        child: Text('In Progress'),
-                      ),
-                      DropdownMenuItem(value: 'Done', child: Text('Done')),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) {
-                        setDialogState(() => auditStatus = value);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 10),
                   _editField(fields['remarks']!, 'Remarks', lines: 2),
                   _editField(fields['locationRemarks']!, 'Location Remarks', lines: 2),
                   DropdownButtonFormField<String>(
@@ -598,7 +579,7 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
                   manufacturerBrandName: fields['manufacturer']!.text.trim(),
                   documentAnalysisResult: fields['documentResult']!.text.trim(),
                   checkResult: fields['checkResult']!.text.trim(),
-                  auditStatus: auditStatus,
+                  auditStatus: checkpoint.auditStatus,
                   remarks: fields['remarks']!.text.trim(),
                   locationRemarks: fields['locationRemarks']!.text.trim(),
                   samplingCheck: procedure == 'Sample' ? 'S' : '-',
@@ -654,6 +635,31 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
     await _refreshCurrentArea();
   }
 
+  Future<void> _changeCheckpointAuditStatus(
+    IhmCheckpoint checkpoint,
+    String value,
+  ) async {
+    final normalized = _auditStatusValue(value);
+    if (_auditStatusValue(checkpoint.auditStatus) == normalized) return;
+
+    try {
+      final saved = await IhmOfflineService.saveFullCheckpoint(
+        checkpoint.copyWith(auditStatus: normalized),
+      );
+      if (!mounted) return;
+      setState(() {
+        _mergeCheckpoint(saved);
+      });
+      await _loadSubmissions();
+      await _refreshCurrentArea();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Audit status update failed: $error')),
+      );
+    }
+  }
+
   Widget _editField(
     TextEditingController controller,
     String label, {
@@ -683,8 +689,8 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
   }
 
   String _checkpointDisplayLabel(IhmCheckpoint checkpoint) {
-  return checkpoint.sampleNo;
-}
+    return checkpoint.sampleNo;
+  }
 
   Widget _sectionLabel(String text) => Text(
     text,
@@ -865,24 +871,20 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
         return _surveyInfoRow(
           Icons.check_circle_outline_rounded,
           'Checkpoint updated',
-          'Audit: ${_displayAuditStatus(checkpoint.auditStatus)}',
+          checkpoint,
           _A.accentGreen,
         );
       }
       return _surveyInfoRow(
         Icons.person_search_outlined,
         'Not surveyed yet',
-        'Audit: ${_displayAuditStatus(checkpoint.auditStatus)}',
+        checkpoint,
         _c.textSecond,
       );
     }
 
     return Column(
       children: submissions.map((submission) {
-        final result =
-            submission.data['Result'] ??
-            submission.data['result'] ??
-            checkpoint.result;
         final status = submission.status.toLowerCase();
         final color = status == 'conflict' ? _A.accentRed : _A.accentGreen;
         return Padding(
@@ -890,7 +892,7 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
           child: _surveyInfoRow(
             Icons.verified_user_outlined,
             '${submission.surveyorName} surveyed',
-            'Result: ${_displayResult(result)}',
+            checkpoint,
             color,
           ),
         );
@@ -901,9 +903,10 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
   Widget _surveyInfoRow(
     IconData icon,
     String title,
-    String result,
+    IhmCheckpoint checkpoint,
     Color color,
   ) {
+    final auditStatus = _auditStatusValue(checkpoint.auditStatus);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -926,12 +929,35 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
               ),
             ),
           ),
-          Text(
-            result,
-            style: TextStyle(
-              color: color,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
+          const SizedBox(width: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 132),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: auditStatus,
+                isDense: true,
+                isExpanded: true,
+                dropdownColor: _c.bgCard,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+                icon: Icon(Icons.keyboard_arrow_down_rounded, color: color),
+                items: const [
+                  DropdownMenuItem(value: 'Pending', child: Text('Pending')),
+                  DropdownMenuItem(
+                    value: 'InProgress',
+                    child: Text('In Progress'),
+                  ),
+                  DropdownMenuItem(value: 'Done', child: Text('Done')),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    _changeCheckpointAuditStatus(checkpoint, value);
+                  }
+                },
+              ),
             ),
           ),
         ],
@@ -939,36 +965,14 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
     );
   }
 
-  String _displayResult(Object? value) {
-    switch (value?.toString().trim().toLowerCase().replaceAll(
-      RegExp(r'[\s_-]'),
-      '',
-    )) {
-      case '2':
-      case 'present':
-        return 'Present';
-      case '3':
-      case 'notpresent':
-        return 'Not Present';
-      case '4':
-      case 'notapplicable':
-        return 'Not Applicable';
-      case '5':
-      case 'samplerequired':
-        return 'Sample Required';
-      default:
-        return 'Pending';
-    }
-  }
-
-  String _displayAuditStatus(Object? value) {
+  String _auditStatusValue(Object? value) {
     switch (value?.toString().trim().toLowerCase().replaceAll(
       RegExp(r'[\s_-]'),
       '',
     )) {
       case '2':
       case 'inprogress':
-        return 'In Progress';
+        return 'InProgress';
       case '3':
       case 'done':
       case 'completed':

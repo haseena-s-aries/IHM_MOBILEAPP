@@ -92,8 +92,9 @@ class SyncService {
 
   static void startAutoSync() {
     refreshSyncStatus();
-    _connectivitySubscription ??=
-        Connectivity().onConnectivityChanged.listen((result) async {
+    _connectivitySubscription ??= Connectivity().onConnectivityChanged.listen((
+      result,
+    ) async {
       if (result == ConnectivityResult.none) {
         syncStatus.value = await _buildSnapshot(
           state: 'offline',
@@ -131,6 +132,7 @@ class SyncService {
       }
 
       final prefs = await SharedPreferences.getInstance();
+      // await _tryBackendLogout(prefs);
       await _clearSessionPreferences(prefs);
       syncStatus.value = SyncSnapshot.initial();
 
@@ -149,6 +151,22 @@ class SyncService {
       _logoutInProgress = false;
     }
   }
+
+  // static Future<void> _tryBackendLogout(SharedPreferences prefs) async {
+  //   final token = prefs.getString('token') ?? '';
+  //   if (token.isEmpty) return;
+
+  //   try {
+  //     await http
+  //         .post(
+  //           Uri.parse('$baseUrl/User/logout'),
+  //           headers: {'Authorization': 'Bearer $token'},
+  //         )
+  //         .timeout(const Duration(seconds: 2));
+  //   } catch (error) {
+  //     debugPrint('Logout: backend logout skipped/failed: $error');
+  //   }
+  // }
 
   static Future<void> _clearSessionPreferences(SharedPreferences prefs) async {
     for (final key in const [
@@ -286,7 +304,8 @@ class SyncService {
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getInt('userId') ?? 0;
     final role = (prefs.getString('userRole') ?? '').toLowerCase();
-    final isAdmin = role == 'admin' ||
+    final isAdmin =
+        role == 'admin' ||
         role == 'global admin' ||
         role == 'globaladmin' ||
         role == 'administrator' ||
@@ -324,15 +343,9 @@ class SyncService {
     }
 
     await fetchAndCache(surveyType: 'IHM Survey');
-    await fetchAndCache(
-      surveyType: 'IHM Survey',
-      ihmCompletionFilter: 'live',
-    );
+    await fetchAndCache(surveyType: 'IHM Survey', ihmCompletionFilter: 'live');
     await fetchAndCache(surveyType: 'Ex-Survey');
-    await fetchAndCache(
-      surveyType: 'Ex-Survey',
-      jobCompletionFilter: 'live',
-    );
+    await fetchAndCache(surveyType: 'Ex-Survey', jobCompletionFilter: 'live');
 
     var cachedJobs = 0;
     for (final job in downloaded.values) {
@@ -708,8 +721,7 @@ class SyncService {
       isSyncing: isSyncing,
       pendingCount: await _pendingOfflineItemCount(),
       failedCount: await _failedOfflineItemCount(),
-      downloadedJobCount:
-          downloadedJobCount ?? metadata.downloadedJobCount,
+      downloadedJobCount: downloadedJobCount ?? metadata.downloadedJobCount,
       uploadedItemCount: uploadedItemCount ?? 0,
       lastSyncedAt: metadata.lastSyncedAt,
       message: message,
@@ -786,24 +798,16 @@ class SyncService {
   }) async {
     final db = await DatabaseHelper.instance.database;
     final now = DateTime.now().toIso8601String();
-    await db.insert(
-      'sync_metadata',
-      {
-        'key': 'lastSyncedAt',
-        'value': lastSyncedAt.toIso8601String(),
-        'updatedAt': now,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-    await db.insert(
-      'sync_metadata',
-      {
-        'key': 'downloadedJobCount',
-        'value': downloadedJobCount.toString(),
-        'updatedAt': now,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('sync_metadata', {
+      'key': 'lastSyncedAt',
+      'value': lastSyncedAt.toIso8601String(),
+      'updatedAt': now,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.insert('sync_metadata', {
+      'key': 'downloadedJobCount',
+      'value': downloadedJobCount.toString(),
+      'updatedAt': now,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   static Future<_SyncMetadata> _readSyncMetadata() async {

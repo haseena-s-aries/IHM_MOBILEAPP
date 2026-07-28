@@ -324,14 +324,8 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
               _DetailsTab(
                 checkpoint: checkpoint,
                 isPchm: isPchm,
-                auditStatus: auditStatus,
-                auditSaved: _auditSaved,
                 isDark: isDark,
                 onPchmChanged: (v) => setState(() => isPchm = v),
-                onAuditResultChanged: (v) => setState(() {
-                  auditStatus = v;
-                  _auditSaved = false;
-                }),
                 remarks: remarks,
                 locationRemarks: locationRemarks,
               ),
@@ -349,23 +343,16 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
 class _DetailsTab extends StatelessWidget {
   final IhmCheckpoint checkpoint;
   final bool isPchm;
-  final String auditStatus;
-  final bool auditSaved;
   final bool isDark;
   final ValueChanged<bool> onPchmChanged;
-  final ValueChanged<String> onAuditResultChanged;
   final TextEditingController remarks;
   final TextEditingController locationRemarks;
 
   const _DetailsTab({
     required this.checkpoint,
     required this.isPchm,
-    required this.auditStatus,
-
-    required this.auditSaved,
     required this.isDark,
     required this.onPchmChanged,
-    required this.onAuditResultChanged,
     required this.remarks,
     required this.locationRemarks,
   });
@@ -373,41 +360,6 @@ class _DetailsTab extends StatelessWidget {
   _TC get _c => isDark ? _TC.dark : _TC.light;
 
   String val(String? x) => x == null || x.trim().isEmpty ? '-' : x.trim();
-
-  bool get _isAuditComplete {
-    final value = auditStatus.trim().toLowerCase().replaceAll(
-      RegExp(r'[\s_-]'),
-      '',
-    );
-    return value == 'done' || value == '3' || value == 'completed';
-  }
-
-  Color get _auditColor {
-    if (auditSaved && _isAuditComplete) return _A.accentGreen;
-    if (_isAuditComplete) return _A.accentAmber;
-    return _c.textSecond;
-  }
-
-  String get _auditStatusText {
-    if (auditSaved && _isAuditComplete) return 'Saved and completed';
-    if (_isAuditComplete) return 'Selected, not saved yet';
-    return 'Pending';
-  }
-
-  String get _auditDisplayText {
-    switch (auditStatus.trim().toLowerCase().replaceAll(
-      RegExp(r'[\s_-]'),
-      '',
-    )) {
-      case 'inprogress':
-        return 'In Progress';
-      case 'done':
-      case 'completed':
-        return 'Done';
-      default:
-        return 'Pending';
-    }
-  }
 
   Widget _sectionLabel(String text) => Padding(
     padding: const EdgeInsets.only(bottom: 12),
@@ -528,38 +480,6 @@ class _DetailsTab extends StatelessWidget {
           ),
         ]),
 
-        Container(
-          width: double.infinity,
-          margin: const EdgeInsets.only(bottom: 18),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: _c.bgCard,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: _c.divider, width: 1),
-          ),
-          child: DropdownButtonFormField<String>(
-            value: auditStatus,
-            decoration: InputDecoration(
-              labelText: 'Audit Result',
-              labelStyle: TextStyle(color: _c.textSecond),
-              prefixIcon: Icon(
-                Icons.assignment_turned_in_outlined,
-                color: _auditColor,
-              ),
-              border: const OutlineInputBorder(),
-            ),
-            dropdownColor: _c.bgCard,
-            style: TextStyle(color: _c.textPrimary),
-            items: const [
-              DropdownMenuItem(value: 'Pending', child: Text('Pending')),
-              DropdownMenuItem(value: 'InProgress', child: Text('In Progress')),
-              DropdownMenuItem(value: 'Done', child: Text('Done')),
-            ],
-            onChanged: (value) {
-              if (value != null) onAuditResultChanged(value);
-            },
-          ),
-        ),
         // ── PCHM & Remarks ────────────────────────────────────────────────
         _sectionLabel('FLAGS & REMARKS'),
         Container(

@@ -57,6 +57,7 @@ void main() async {
 
   final prefs = await SharedPreferences.getInstance();
   final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
+  final token = prefs.getString('token') ?? '';
   final userRole = prefs.getString('userRole');
   final userId = prefs.getInt('userId');
   final fullName = prefs.getString('fullName');
@@ -77,7 +78,7 @@ void main() async {
 
   Widget initialScreen;
 
-  if (isLoggedIn && userRole != null && userId != null) {
+  if (isLoggedIn && token.isNotEmpty && userRole != null && userId != null) {
     final normalizedRole = userRole.toLowerCase();
     final isGlobalAdminRole = normalizedRole == 'admin' ||
         normalizedRole == 'global admin' ||
