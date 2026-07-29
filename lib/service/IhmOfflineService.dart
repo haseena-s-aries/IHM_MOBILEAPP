@@ -576,23 +576,31 @@ final existing = existingRows
     await syncPendingIhmData();
   }
 
-  static Future<List<IhmSamplingPhoto>> getCheckpointPhotos(
-    IhmCheckpoint checkpoint,
-  ) async {
-    if (kIsWeb) {
-      return ApiService.fetchCheckpointPhotos(checkpoint.id);
-    }
-
-    if (await isOnline) {
-      try {
-        final photos = await ApiService.fetchCheckpointPhotos(checkpoint.id);
-        await _cachePhotos(checkpoint, photos);
-        await syncPendingIhmData();
-      } catch (_) {}
-    }
-
-    return getLocalCheckpointPhotos(checkpoint.id);
+static Future<List<IhmSamplingPhoto>> getCheckpointPhotos(
+  IhmCheckpoint checkpoint,
+) async {
+  if (kIsWeb) {
+    return ApiService.fetchCheckpointPhotos(checkpoint.id);
   }
+
+  if (await isOnline) {
+    try {
+      final photos = await ApiService.fetchCheckpointPhotos(checkpoint.id);
+
+      try {
+        await _cachePhotos(checkpoint, photos);
+      } catch (_) {
+        // Cache failure should not hide server images from mobile UI.
+      }
+
+      return photos;
+    } catch (_) {
+      // Offline/fetch failed: fall back to local cache.
+    }
+  }
+
+  return getLocalCheckpointPhotos(checkpoint.id);
+}
 
   static Future<List<IhmSamplingPhoto>> getLocalCheckpointPhotos(
     int checkpointId,
@@ -628,13 +636,11 @@ final existing = existingRows
           fileBytes: fileBytes,
           fileName: fileName,
         );
-        await _cachePhotos(checkpoint, [uploaded]);
-        await syncPendingIhmData();
-        final cachedPhotos = await getLocalCheckpointPhotos(checkpoint.id);
-        return cachedPhotos.firstWhere(
-          (photo) => photo.id == uploaded.id,
-          orElse: () => uploaded,
-        );
+        try {
+          await _cachePhotos(checkpoint, [uploaded]);
+        } catch (_) {}
+
+        return uploaded;
       } catch (_) {
         // Keep the photo locally if the device has a network but the API call fails.
       }
@@ -661,7 +667,7 @@ final existing = existingRows
       payload: {'localId': localId},
     );
 
-    await syncPendingIhmData();
+
     final rows = await db.query(
       'ihm_sampling_photos',
       where: 'id = ?',
@@ -1041,20 +1047,26 @@ final existing = existingRows
         fileName: localPath.split(RegExp(r'[\\/]')).last,
       );
 
-      await db.update(
-        'ihm_sampling_photos',
-        uploaded.toLocalMap(
-          surveyJobId: checkpoint.surveyJobId,
-          checkpointId: checkpoint.id,
-          areaId: checkpoint.ihmAreaId,
-          localId: localId,
-          localFilePath: localPath,
-          synced: 1,
-        ),
-        where: 'id = ?',
-        whereArgs: [localId],
-      );
-      return;
+   await db.delete(
+  'ihm_sampling_photos',
+  where: '(serverId = ? OR id = ?) AND id != ?',
+  whereArgs: [uploaded.id, uploaded.id, localId],
+);
+
+await db.update(
+  'ihm_sampling_photos',
+  uploaded.toLocalMap(
+    surveyJobId: checkpoint.surveyJobId,
+    checkpointId: checkpoint.id,
+    areaId: checkpoint.ihmAreaId,
+    localId: localId,
+    localFilePath: localPath,
+    synced: 1,
+  ),
+  where: 'id = ?',
+  whereArgs: [localId],
+);
+return;
     }
   }
 
@@ -1319,14 +1331,23 @@ final existing = existingRows
     );
   }
 
-  static IhmSamplingPhoto _photoFromLocal(Map<String, Object?> row) {
-    return IhmSamplingPhoto(
-      id: _int(row['id']),
-      filePath: row['filePath']?.toString() ?? '',
-      localFilePath: row['localFilePath']?.toString(),
-      caption: row['caption']?.toString(),
-    );
-  }
+ static IhmSamplingPhoto _photoFromLocal(Map<String, Object?> row) {
+  return IhmSamplingPhoto(
+    id: _int(row['serverId']) > 0 ? _int(row['serverId']) : _int(row['id']),
+    filePath: row['filePath']?.toString() ?? '',
+    localFilePath: row['localFilePath']?.toString(),
+    caption: row['caption']?.toString(),
+    showInAppendixThree: _int(row['showInAppendixThree']) == 1,
+    appendixThreeSortOrder: _int(row['appendixThreeSortOrder']),
+    appendixThreeEditedFilePath: row['appendixThreeEditedFilePath']?.toString(),
+    appendixThreeWidth: row['appendixThreeWidth'] == null
+        ? null
+        : _int(row['appendixThreeWidth']),
+    appendixThreeHeight: row['appendixThreeHeight'] == null
+        ? null
+        : _int(row['appendixThreeHeight']),
+  );
+}
 
   static IhmCheckpoint _checkpointForRelatedUpload({
     required int surveyJobId,
