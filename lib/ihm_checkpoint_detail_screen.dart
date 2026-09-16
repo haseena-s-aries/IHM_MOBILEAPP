@@ -1103,13 +1103,14 @@ class _AreaTabState extends State<_AreaTab> {
     return ClipRect(
       child: InteractiveViewer(
         transformationController: _controller,
-        minScale: 0.25,
-        maxScale: 8,
+        minScale: 0.15,
+        maxScale: 10,
         panEnabled: true,
         scaleEnabled: true,
         constrained: false,
-        boundaryMargin: const EdgeInsets.all(10000),
-        interactionEndFrictionCoefficient: 0.000008,
+        alignment: Alignment.center,
+        boundaryMargin: const EdgeInsets.all(double.infinity),
+        interactionEndFrictionCoefficient: 0.000001,
         panAxis: PanAxis.free,
         child: SizedBox(
           key: _layoutImageKey,
@@ -1424,11 +1425,7 @@ class _LayoutZoomControls extends StatelessWidget {
     );
   }
 
-  Widget _divider() => Container(
-    width: 1,
-    height: 24,
-    color: colorSet.divider,
-  );
+  Widget _divider() => Container(width: 1, height: 24, color: colorSet.divider);
 
   Widget _zoomButton({
     required IconData icon,
@@ -1561,7 +1558,7 @@ class _ImagesTabState extends State<_ImagesTab> {
 
       if (!mounted) return;
       setState(() {
-        photos.insertAll(0, uploadedPhotos.reversed);
+        photos.addAll(uploadedPhotos);
         uploading = false;
       });
     } catch (e) {

@@ -628,14 +628,38 @@ static Future<List<Map<String, dynamic>>> fetchReportRemarks() async {
     throw Exception('PDF path not found in response');
   }
 
-  static String fileUrl(String path) {
-    if (path.startsWith('http')) return path;
+ static String fileUrl(String path) {
+  final value = path.trim();
+  if (value.isEmpty) return value;
 
-    final apiRoot = baseUrl.replaceFirst(RegExp(r'/api/?$'), '');
-    final cleanPath = path.startsWith('/') ? path : '/$path';
-
-    return '$apiRoot$cleanPath';
+  if (value.startsWith('http')) {
+    final uri = Uri.parse(value);
+    return Uri(
+      scheme: uri.scheme,
+      userInfo: uri.userInfo,
+      host: uri.host,
+      port: uri.hasPort ? uri.port : null,
+      pathSegments: uri.pathSegments,
+      query: uri.query.isEmpty ? null : uri.query,
+      fragment: uri.fragment.isEmpty ? null : uri.fragment,
+    ).toString();
   }
+
+  final apiRoot = baseUrl.replaceFirst(RegExp(r'/api/?$'), '');
+  final root = Uri.parse(apiRoot);
+  final cleanPath = value.replaceFirst(RegExp(r'^/+'), '');
+
+  return Uri(
+    scheme: root.scheme,
+    userInfo: root.userInfo,
+    host: root.host,
+    port: root.hasPort ? root.port : null,
+    pathSegments: [
+      ...root.pathSegments.where((x) => x.isNotEmpty),
+      ...cleanPath.split('/').where((x) => x.isNotEmpty),
+    ],
+  ).toString();
+}
 
   static Future<Map<String, dynamic>?> fetchIhmReportInfo(int jobId) async {
     final response = await http.get(
