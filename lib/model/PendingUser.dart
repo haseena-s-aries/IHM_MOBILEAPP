@@ -42,9 +42,15 @@ class ProjectOption {
 
   factory ProjectOption.fromJson(Map<String, dynamic> json) {
     return ProjectOption(
-      id: int.tryParse(json['id']?.toString() ?? '') ?? 0,
-      name: json['name']?.toString() ?? '',
-      code: json['code']?.toString(),
+      id: int.tryParse((json['id'] ?? json['Id'])?.toString() ?? '') ?? 0,
+      name:
+          (json['name'] ??
+                  json['Name'] ??
+                  json['projectName'] ??
+                  json['ProjectName'])
+              ?.toString() ??
+          '',
+      code: (json['code'] ?? json['Code'])?.toString(),
     );
   }
 }
@@ -57,8 +63,11 @@ class RoleOption {
 
   factory RoleOption.fromJson(Map<String, dynamic> json) {
     return RoleOption(
-      id: int.tryParse(json['id']?.toString() ?? '') ?? 0,
-      roleName: json['roleName']?.toString() ?? '',
+      id: int.tryParse((json['id'] ?? json['Id'])?.toString() ?? '') ?? 0,
+      roleName:
+          (json['roleName'] ?? json['RoleName'] ?? json['name'] ?? json['Name'])
+              ?.toString() ??
+          '',
     );
   }
 }

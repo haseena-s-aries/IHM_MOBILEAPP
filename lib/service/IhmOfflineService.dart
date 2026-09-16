@@ -16,6 +16,8 @@ import 'package:sqflite/sqflite.dart';
 class IhmOfflineService {
   static bool _syncing = false;
 
+  static const int _parallelFetchLimit = 6;
+
   static Future<bool> get isOnline async {
     final result = await Connectivity().checkConnectivity();
     return result != ConnectivityResult.none;
@@ -788,43 +790,68 @@ final existing = existingRows
     if (kIsWeb || job.id <= 0 || !(await isOnline)) return 0;
 
     var cachedJobs = 0;
+    final failures = <String>[];
     final hasVscpChecklist =
         (job.vscpChecklistFilePath ?? '').trim().isNotEmpty;
 
     if (hasVscpChecklist) {
-      await cacheVscpChecklist(
-        jobId: job.id,
-        fileName: job.vscpChecklistFileName,
-        serverPath: job.vscpChecklistFilePath,
-      );
+      try {
+        await cacheVscpChecklist(
+          jobId: job.id,
+          fileName: job.vscpChecklistFileName,
+          serverPath: job.vscpChecklistFilePath,
+        );
+      } catch (error) {
+        failures.add('VSCP Checklist: $error');
+      }
     }
 
     final areas = await ApiService.fetchIhmAreasWithCheckpoints(job.id);
     await cacheAreas(job.id, areas);
 
-    try {
-      final markers = await ApiService.fetchIhmMarkers(job.id);
-      await _cacheMarkers(job.id, markers);
-    } catch (_) {}
+    final markerTask = () async {
+      try {
+        final markers = await ApiService.fetchIhmMarkers(job.id);
+        await _cacheMarkers(job.id, markers);
+      } catch (error) {
+        failures.add('Markers: $error');
+      }
+    }();
 
-    for (final area in areas) {
+    final layoutTasks = areas.map((area) async {
       try {
         final layouts = await ApiService.fetchIhmLayouts(
           jobId: job.id,
           areaId: area.id,
         );
-        await _cacheLayouts(job.id, area.id, layouts);
-      } catch (_) {}
+        await _cacheLayouts(job.id, area.id, layouts, failures: failures);
+      } catch (error) {
+        failures.add('Layout ${area.areaName}: $error');
+      }
+    }).toList();
 
-      for (final checkpoint in area.checkpoints) {
+    final photoTasks = areas
+        .expand((area) => area.checkpoints)
+        .map((checkpoint) async {
         try {
           final photos = await ApiService.fetchCheckpointPhotos(checkpoint.id);
-          await _cachePhotos(checkpoint, photos);
-        } catch (_) {}
-      }
-    }
+          await _cachePhotos(checkpoint, photos, failures: failures);
+        } catch (error) {
+          failures.add('Photos ${checkpoint.sampleNo}: $error');
+        }
+      }).toList();
+
+    await markerTask;
+    await _runInBatches(layoutTasks, _parallelFetchLimit);
+    await _runInBatches(photoTasks, _parallelFetchLimit);
 
     cachedJobs++;
+    await SurveyJobOfflineService.refreshCachedIhmDisplayStatus(job.id);
+
+    if (failures.isNotEmpty) {
+      throw IhmOfflineCacheException(job.id, failures);
+    }
+
     return cachedJobs;
   }
 
@@ -857,34 +884,34 @@ final existing = existingRows
       return;
     }
 
-    try {
-      final bytes = await ApiService.downloadVscpChecklist(jobId);
-      if (bytes.isEmpty) return;
+    final bytes = await ApiService.downloadVscpChecklist(jobId);
+    if (bytes.isEmpty) {
+      throw Exception('Downloaded checklist was empty.');
+    }
 
-      final localPath = await writeIhmLocalFile(
-        bytes,
-        _safeFileName(
-          (fileName ?? '').trim().isEmpty
-              ? 'vscp-checklist-$jobId.xlsx'
-              : fileName!.trim(),
-        ),
-        folderName: 'ihm_vscp_checklists',
-      );
-      final now = DateTime.now().toIso8601String();
+    final localPath = await writeIhmLocalFile(
+      bytes,
+      _safeFileName(
+        (fileName ?? '').trim().isEmpty
+            ? 'vscp-checklist-$jobId.xlsx'
+            : fileName!.trim(),
+      ),
+      folderName: 'ihm_vscp_checklists',
+    );
+    final now = DateTime.now().toIso8601String();
 
-      await db.insert(
-        'ihm_cached_files',
-        {
-          'surveyJobId': jobId,
-          'fileType': 'vscpChecklist',
-          'serverPath': pathKey,
-          'localPath': localPath,
-          'fileName': fileName,
-          'updatedAt': now,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-    } catch (_) {}
+    await db.insert(
+      'ihm_cached_files',
+      {
+        'surveyJobId': jobId,
+        'fileType': 'vscpChecklist',
+        'serverPath': pathKey,
+        'localPath': localPath,
+        'fileName': fileName,
+        'updatedAt': now,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   static Future<String?> getCachedVscpChecklistLocalPath(int jobId) async {
@@ -1078,13 +1105,19 @@ final existing = existingRows
 
   static Future<void> _cachePhotos(
     IhmCheckpoint checkpoint,
-    List<IhmSamplingPhoto> photos,
-  ) async {
+    List<IhmSamplingPhoto> photos, {
+    List<String>? failures,
+  }) async {
     final db = await DatabaseHelper.instance.database;
     for (final photo in photos) {
       final existing = await db.query(
         'ihm_sampling_photos',
-        columns: ['filePath', 'localFilePath'],
+        columns: [
+          'filePath',
+          'localFilePath',
+          'appendixThreeEditedFilePath',
+          'appendixThreeEditedLocalFilePath',
+        ],
         where: 'id = ?',
         whereArgs: [photo.id],
         limit: 1,
@@ -1101,7 +1134,29 @@ final existing = existingRows
         existingLocalPath: existingLocalPath,
         fallbackFileName: 'checkpoint_photo_${photo.id}.jpg',
         folderName: 'ihm_sampling_photos',
+        requiredForOffline: true,
+        failures: failures,
+        label: 'Checkpoint ${checkpoint.sampleNo} photo ${photo.id}',
       );
+      final editedPath = photo.appendixThreeEditedFilePath;
+      final existingEditedFilePath = existing.isEmpty
+          ? null
+          : existing.first['appendixThreeEditedFilePath']?.toString();
+      final existingEditedLocalPath =
+          existingEditedFilePath == editedPath && existing.isNotEmpty
+          ? existing.first['appendixThreeEditedLocalFilePath']?.toString()
+          : null;
+      final editedLocalPath = editedPath != null && editedPath.trim().isNotEmpty
+          ? await _ensureCachedRemoteFile(
+              remotePath: editedPath,
+              existingLocalPath: existingEditedLocalPath,
+              fallbackFileName: 'checkpoint_photo_${photo.id}_edited.jpg',
+              folderName: 'ihm_sampling_photos',
+              requiredForOffline: true,
+              failures: failures,
+              label: 'Checkpoint ${checkpoint.sampleNo} edited photo ${photo.id}',
+            )
+          : existingEditedLocalPath;
 
       await db.insert(
         'ihm_sampling_photos',
@@ -1111,6 +1166,7 @@ final existing = existingRows
           areaId: checkpoint.ihmAreaId,
           localId: photo.id,
           localFilePath: localPath,
+          appendixThreeEditedLocalFilePath: editedLocalPath,
         ),
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
@@ -1120,23 +1176,29 @@ final existing = existingRows
   static Future<void> _cacheLayouts(
     int jobId,
     int areaId,
-    List<IhmLayoutImage> layouts,
-  ) async {
+    List<IhmLayoutImage> layouts, {
+    List<String>? failures,
+  }) async {
     final db = await DatabaseHelper.instance.database;
     final layoutIds = layouts.map((layout) => layout.id).toSet();
     if (layoutIds.isEmpty) {
       await db.delete(
         'ihm_layout_images',
-        where: 'surveyJobId = ? AND (ihmAreaId = ? OR isCommon = 1)',
+        where: 'surveyJobId = ? AND ihmAreaId = ? AND isCommon = 0',
         whereArgs: [jobId, areaId],
       );
     } else {
-      final placeholders = layoutIds.map((_) => '?').join(',');
+      final areaLayoutIds = layouts
+          .where((layout) => !layout.isCommon)
+          .map((layout) => layout.id)
+          .toSet();
+      final placeholders = areaLayoutIds.map((_) => '?').join(',');
       await db.delete(
         'ihm_layout_images',
-        where:
-            'surveyJobId = ? AND (ihmAreaId = ? OR isCommon = 1) AND id NOT IN ($placeholders)',
-        whereArgs: [jobId, areaId, ...layoutIds],
+        where: areaLayoutIds.isEmpty
+            ? 'surveyJobId = ? AND ihmAreaId = ? AND isCommon = 0'
+            : 'surveyJobId = ? AND ihmAreaId = ? AND isCommon = 0 AND id NOT IN ($placeholders)',
+        whereArgs: [jobId, areaId, ...areaLayoutIds],
       );
     }
 
@@ -1162,6 +1224,9 @@ final existing = existingRows
             ? 'layout_${layout.id}.jpg'
             : layout.originalFileName,
         folderName: 'ihm_layout_images',
+        requiredForOffline: true,
+        failures: failures,
+        label: layout.isCommon ? 'Common layout' : 'Area $areaId layout',
       );
 
       await db.insert(
@@ -1325,6 +1390,16 @@ final existing = existingRows
       filePath: row['filePath']?.toString() ?? '',
       localFilePath: row['localFilePath']?.toString(),
       caption: row['caption']?.toString(),
+      showInAppendixThree: _int(row['showInAppendixThree']) == 1,
+      appendixThreeSortOrder: _int(row['appendixThreeSortOrder']),
+      appendixThreeEditedFilePath: row['appendixThreeEditedFilePath']?.toString(),
+      appendixThreeEditedLocalFilePath: row['appendixThreeEditedLocalFilePath']?.toString(),
+      appendixThreeWidth: row['appendixThreeWidth'] == null
+          ? null
+          : _int(row['appendixThreeWidth']),
+      appendixThreeHeight: row['appendixThreeHeight'] == null
+          ? null
+          : _int(row['appendixThreeHeight']),
     );
   }
 
@@ -1352,32 +1427,85 @@ final existing = existingRows
     required String? existingLocalPath,
     required String fallbackFileName,
     required String folderName,
+    bool requiredForOffline = false,
+    List<String>? failures,
+    String? label,
   }) async {
-    if (remotePath.trim().isEmpty || remotePath.toLowerCase().endsWith('.pdf')) {
+    if (remotePath.trim().isEmpty) {
+      if (requiredForOffline) {
+        failures?.add('${label ?? 'File'}: missing server path.');
+      }
+      debugPrint(
+        '[IHM offline image] ${label ?? 'File'} skipped: missing remote path.',
+      );
       return existingLocalPath;
     }
 
     if (existingLocalPath != null &&
         existingLocalPath.isNotEmpty &&
         await _canReadLocalFile(existingLocalPath)) {
+      debugPrint(
+        '[IHM offline image] ${label ?? remotePath} reused. '
+        'remote=${ApiService.fileUrl(remotePath)} local=$existingLocalPath exists=true',
+      );
       return existingLocalPath;
     }
 
     try {
-      final response = await http.get(Uri.parse(ApiService.fileUrl(remotePath)));
+      final remoteUrl = ApiService.fileUrl(remotePath);
+      debugPrint(
+        '[IHM offline image] ${label ?? remotePath} downloading. '
+        'remote=$remoteUrl existingLocal=$existingLocalPath',
+      );
+      final response = await http.get(Uri.parse(remoteUrl));
       if (response.statusCode < 200 ||
           response.statusCode >= 300 ||
           response.bodyBytes.isEmpty) {
+        if (requiredForOffline) {
+          final reason = response.statusCode == 404
+              ? 'server file missing (404); offline placeholder will be used'
+              : 'download failed (${response.statusCode})';
+          failures?.add('${label ?? remotePath}: $reason.');
+        }
+        debugPrint(
+          '[IHM offline image] ${label ?? remotePath} download failed. '
+          'status=${response.statusCode} bytes=${response.bodyBytes.length}',
+        );
         return existingLocalPath;
       }
 
-      return writeIhmLocalFile(
+      final localPath = await writeIhmLocalFile(
         response.bodyBytes,
         _remoteFileName(remotePath, fallbackFileName),
         folderName: folderName,
       );
-    } catch (_) {
+      final exists = await _canReadLocalFile(localPath);
+      debugPrint(
+        '[IHM offline image] ${label ?? remotePath} downloaded. '
+        'remote=$remoteUrl local=$localPath exists=$exists bytes=${response.bodyBytes.length}',
+      );
+      return localPath;
+    } catch (error) {
+      if (requiredForOffline) {
+        failures?.add('${label ?? remotePath}: $error');
+      }
+      debugPrint(
+        '[IHM offline image] ${label ?? remotePath} download error. '
+        'remote=${ApiService.fileUrl(remotePath)} local=$existingLocalPath error=$error',
+      );
       return existingLocalPath;
+    }
+  }
+
+  static Future<void> _runInBatches(
+    List<Future<void>> tasks,
+    int batchSize,
+  ) async {
+    for (var start = 0; start < tasks.length; start += batchSize) {
+      final end = (start + batchSize) > tasks.length
+          ? tasks.length
+          : start + batchSize;
+      await Future.wait(tasks.sublist(start, end));
     }
   }
 
@@ -1400,5 +1528,19 @@ final existing = existingRows
 
   static String _safeFileName(String fileName) {
     return fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+  }
+}
+
+class IhmOfflineCacheException implements Exception {
+  final int jobId;
+  final List<String> failures;
+
+  IhmOfflineCacheException(this.jobId, this.failures);
+
+  @override
+  String toString() {
+    final shown = failures.take(3).join('; ');
+    final extra = failures.length > 3 ? ' (+${failures.length - 3} more)' : '';
+    return 'Job $jobId partial offline cache: $shown$extra';
   }
 }

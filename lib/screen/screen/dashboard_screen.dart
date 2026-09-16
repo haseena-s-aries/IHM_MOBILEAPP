@@ -71,7 +71,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         Connectivity().onConnectivityChanged.listen((result) async {
       if (result != ConnectivityResult.none) {
         await SyncService.syncAllOfflineData();
-        await SyncService.syncFromServerToLocal();
 
         // ✅ Refresh dashboard data after sync
         _fetchCertificateReport();
@@ -96,7 +95,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(snapshot.message ?? snapshot.label),
-        action: snapshot.failedCount > 0
+        action: snapshot.failedCount > 0 || snapshot.state == 'failed'
             ? SnackBarAction(
                 label: 'Retry',
                 onPressed: () => _runManualSync(),
@@ -201,7 +200,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               },
                         icon: const Icon(Icons.sync_rounded),
                         label: Text(
-                          snapshot.failedCount > 0 ? 'Retry' : 'Sync now',
+                          snapshot.failedCount > 0 || snapshot.state == 'failed'
+                              ? 'Retry'
+                              : 'Sync now',
                         ),
                       ),
                     ),
@@ -482,7 +483,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return RefreshIndicator(
       onRefresh: () async {
         await SyncService.syncAllOfflineData();
-        await SyncService.syncFromServerToLocal();
         await _fetchCertificateReport();
         await _loadNotifications();
       },

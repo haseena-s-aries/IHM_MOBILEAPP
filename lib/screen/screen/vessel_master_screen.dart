@@ -31,6 +31,9 @@ class VesselMasterScreen extends StatefulWidget {
 }
 
 class _VesselMasterScreenState extends State<VesselMasterScreen> {
+  static const String _duplicateVesselNameMessage =
+      'A vessel with this name already exists. Please use a different name.';
+
   bool isLoading = true;
   bool _isRefreshingVessels = false;
   String? errorMessage;
@@ -108,6 +111,17 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
           (v.vesselType ?? '').toLowerCase().contains(q) ||
           (v.callSign ?? '').toLowerCase().contains(q);
     }).toList();
+  }
+
+  String _normalizeVesselName(String value) => value.trim().toLowerCase();
+
+  bool _hasDuplicateVesselName(String vesselName, {int? excludingVesselId}) {
+    final normalizedName = _normalizeVesselName(vesselName);
+    return vessels.any(
+      (vessel) =>
+          vessel.id != excludingVesselId &&
+          _normalizeVesselName(vessel.vesselName) == normalizedName,
+    );
   }
 
   // â”€â”€â”€ Create Dialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -337,6 +351,17 @@ class _VesselMasterScreenState extends State<VesselMasterScreen> {
                               title: 'Vessel name required',
                               message:
                                   'Enter a vessel name before saving this record.',
+                            );
+                            return;
+                          }
+                          if (_hasDuplicateVesselName(
+                            vesselName.text,
+                            excludingVesselId: vessel?.id,
+                          )) {
+                            await AppDialog.error(
+                              context,
+                              title: 'Duplicate vessel name',
+                              message: _duplicateVesselNameMessage,
                             );
                             return;
                           }

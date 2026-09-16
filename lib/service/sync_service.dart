@@ -86,6 +86,7 @@ class SyncService {
   static bool _isSyncing = false;
   static bool _logoutInProgress = false;
   static bool _cancelRequested = false;
+  static String? _lastDownloadWarning;
   static StreamSubscription<ConnectivityResult>? _connectivitySubscription;
   static final ValueNotifier<SyncSnapshot> syncStatus =
       ValueNotifier<SyncSnapshot>(SyncSnapshot.initial());
@@ -222,6 +223,7 @@ class SyncService {
 
     _isSyncing = true;
     _cancelRequested = false;
+    _lastDownloadWarning = null;
     final pendingBefore = await _pendingOfflineItemCount();
     syncStatus.value = await _buildSnapshot(
       state: 'syncing',
@@ -256,6 +258,8 @@ class SyncService {
 
       final pendingAfter = await _pendingOfflineItemCount();
       final failedAfter = await _failedOfflineItemCount();
+      final hasDownloadWarning =
+          _lastDownloadWarning != null && _lastDownloadWarning!.isNotEmpty;
       final now = DateTime.now();
       await _saveSyncMetadata(
         lastSyncedAt: now,
@@ -274,7 +278,9 @@ class SyncService {
         lastSyncedAt: now,
         message: failedAfter > 0
             ? '$failedAfter item(s) need retry.'
-            : 'Sync completed successfully.',
+            : (hasDownloadWarning
+                ? _lastDownloadWarning
+                : 'Sync completed successfully.'),
       );
       syncStatus.value = snapshot;
       return snapshot;
@@ -312,6 +318,7 @@ class SyncService {
         role == 'manager';
     final downloaded = <int, SurveyJob>{};
     var fetchFailures = 0;
+    final cacheFailures = <String>[];
 
     Future<void> fetchAndCache({
       required String surveyType,
@@ -342,31 +349,60 @@ class SyncService {
       }
     }
 
-    await fetchAndCache(surveyType: 'IHM Survey');
-    await fetchAndCache(surveyType: 'IHM Survey', ihmCompletionFilter: 'live');
-    await fetchAndCache(surveyType: 'Ex-Survey');
-    await fetchAndCache(surveyType: 'Ex-Survey', jobCompletionFilter: 'live');
+    await Future.wait([
+      fetchAndCache(surveyType: 'IHM Survey'),
+      fetchAndCache(surveyType: 'IHM Survey', ihmCompletionFilter: 'live'),
+      fetchAndCache(surveyType: 'Ex-Survey'),
+      fetchAndCache(surveyType: 'Ex-Survey', jobCompletionFilter: 'live'),
+    ]);
 
     var cachedJobs = 0;
-    for (final job in downloaded.values) {
-      if (_isIhmJob(job)) {
-        try {
-          cachedJobs += await IhmOfflineService.cacheJobForOffline(job);
-        } catch (_) {}
-      } else {
-        try {
-          await ExSurveyOfflineService.fetchEquipment(job.id);
-          await ExSurveyOfflineService.fetchDefects(job.id);
-          await ExSurveyOfflineService.fetchPhotos(job.id);
-          await ExSurveyOfflineService.fetchDocuments(job.id);
-          cachedJobs++;
-        } catch (_) {}
-      }
+    final jobs = downloaded.values.toList();
+    const cacheBatchSize = 3;
+    for (var start = 0; start < jobs.length; start += cacheBatchSize) {
       if (_cancelRequested) break;
+      final end = (start + cacheBatchSize) > jobs.length
+          ? jobs.length
+          : start + cacheBatchSize;
+      final batchCounts = await Future.wait(
+        jobs.sublist(start, end).map((job) async {
+          if (_isIhmJob(job)) {
+            try {
+              return await IhmOfflineService.cacheJobForOffline(job);
+            } catch (error) {
+              cacheFailures.add(error.toString());
+              return error is IhmOfflineCacheException ? 1 : 0;
+            }
+          }
+
+          try {
+            await Future.wait([
+              ExSurveyOfflineService.fetchEquipment(job.id),
+              ExSurveyOfflineService.fetchDefects(job.id),
+              ExSurveyOfflineService.fetchPhotos(job.id),
+              ExSurveyOfflineService.fetchDocuments(job.id),
+            ]);
+            return 1;
+          } catch (error) {
+            cacheFailures.add('EX job ${job.id}: $error');
+            return 0;
+          }
+        }),
+      );
+      cachedJobs += batchCounts.fold<int>(0, (total, count) => total + count);
     }
 
     if (downloaded.isEmpty && fetchFailures > 0) {
       throw Exception('Unable to download accessible jobs.');
+    }
+
+    if (cacheFailures.isNotEmpty) {
+      final shown = cacheFailures.take(3).join(' | ');
+      final extra = cacheFailures.length > 3
+          ? ' (+${cacheFailures.length - 3} more)'
+          : '';
+      _lastDownloadWarning =
+          'Sync completed. Some linked files are missing on the server, so placeholders will be shown offline. $shown$extra';
     }
 
     return cachedJobs;

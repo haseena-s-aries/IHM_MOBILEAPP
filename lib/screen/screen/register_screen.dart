@@ -27,6 +27,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   List<ProjectOption> _projects = [];
   List<RoleOption> _roles = [];
   bool _loadingProjects = true;
+  bool _loadingRoles = false;
   bool _otpSent = false;
   bool _otpVerified = false;
   bool _sendingOtp = false;
@@ -35,6 +36,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   String? _otpVerificationToken;
+  String? _projectLoadError;
+  String? _roleLoadError;
   Timer? _resendTimer;
   int _resendSeconds = 0;
 
@@ -52,6 +55,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> _loadProjects() async {
+    if (!mounted) return;
+    setState(() {
+      _loadingProjects = true;
+      _projectLoadError = null;
+      _roleLoadError = null;
+      _roles = [];
+      _selectedRoleId = null;
+      _selectedRole = '';
+    });
+
     try {
       final projects = await ApiService.fetchProjects();
       if (!mounted) return;
@@ -63,12 +76,28 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (_selectedProjectId != null) {
         await _loadRoles(_selectedProjectId!);
       }
-    } catch (_) {
-      if (mounted) setState(() => _loadingProjects = false);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _projects = [];
+          _selectedProjectId = null;
+          _loadingProjects = false;
+          _projectLoadError = error.toString().replaceFirst('Exception: ', '');
+        });
+      }
     }
   }
 
   Future<void> _loadRoles(int projectId) async {
+    if (!mounted) return;
+    setState(() {
+      _loadingRoles = true;
+      _roleLoadError = null;
+      _roles = [];
+      _selectedRoleId = null;
+      _selectedRole = '';
+    });
+
     try {
       final roles = await ApiService.fetchPublicRoles(projectId);
       if (!mounted) return;
@@ -76,13 +105,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _roles = roles;
         _selectedRoleId = roles.isNotEmpty ? roles.first.id : null;
         _selectedRole = roles.isNotEmpty ? roles.first.roleName : '';
+        _loadingRoles = false;
       });
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
       setState(() {
         _roles = [];
         _selectedRoleId = null;
         _selectedRole = '';
+        _loadingRoles = false;
+        _roleLoadError = error.toString().replaceFirst('Exception: ', '');
       });
     }
   }
@@ -169,7 +201,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> _sendOtp() async {
     FocusScope.of(context).unfocus();
     if (_sendingOtp || _resendSeconds > 0) return;
-    if (!_formKey.currentState!.validate()) return;
+
+    final nameError = _validateName(_nameController.text);
+    final emailError = _validateEmail(_emailController.text);
+    if (nameError != null || emailError != null) {
+      await _showPopup(
+        'Required Details',
+        nameError ?? emailError ?? 'Please enter your name and email.',
+      );
+      return;
+    }
 
     setState(() {
       _sendingOtp = true;
@@ -324,6 +365,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.of(context).size.width > 720;
+    final selectedProjectValue =
+        _projects.any((project) => project.id == _selectedProjectId)
+        ? _selectedProjectId
+        : null;
+    final selectedRoleValue = _roles.any((role) => role.id == _selectedRoleId)
+        ? _selectedRoleId
+        : null;
 
     return Scaffold(
       body: Container(
@@ -464,22 +512,33 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         const SizedBox(height: 14),
                         DropdownButtonFormField<int>(
-                          value: _selectedProjectId,
+                          value: selectedProjectValue,
                           decoration: _inputDecoration(
-                            label: 'Requested Project / Module',
+                            label: _loadingProjects
+                                ? 'Loading projects...'
+                                : 'Requested Project / Module',
                             icon: Icons.apps_rounded,
+                          ),
+                          isExpanded: true,
+                          hint: Text(
+                            _loadingProjects
+                                ? 'Loading projects...'
+                                : 'Select Project',
                           ),
                           items: _projects
                               .map(
                                 (project) => DropdownMenuItem<int>(
                                   value: project.id,
-                                  child: Text(project.name),
+                                  child: Text(
+                                    project.name,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                               )
                               .toList(),
                           validator: (value) =>
                               value == null ? 'Please select Project' : null,
-                          onChanged: _loadingProjects
+                          onChanged: _loadingProjects || _projects.isEmpty
                               ? null
                               : (value) async {
                                   if (value == null) return;
@@ -492,36 +551,90 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   await _loadRoles(value);
                                 },
                         ),
+                        if (_loadingProjects)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 8),
+                            child: LinearProgressIndicator(minHeight: 3),
+                          ),
+                        if (_projectLoadError != null)
+                          _inlineError(
+                            _projectLoadError!,
+                            actionLabel: 'Retry',
+                            onPressed: _loadProjects,
+                          ),
+                        if (!_loadingProjects &&
+                            _projects.isEmpty &&
+                            _projectLoadError == null)
+                          _inlineError(
+                            'No active projects are available for registration.',
+                            actionLabel: 'Retry',
+                            onPressed: _loadProjects,
+                          ),
                         const SizedBox(height: 14),
                         DropdownButtonFormField<int>(
-                          value: _selectedRoleId,
+                          value: selectedRoleValue,
                           decoration: _inputDecoration(
-                            label: 'Requested Role',
+                            label: _loadingRoles
+                                ? 'Loading roles...'
+                                : 'Requested Role',
                             icon: Icons.badge_rounded,
+                          ),
+                          isExpanded: true,
+                          hint: Text(
+                            _loadingRoles ? 'Loading roles...' : 'Select Role',
                           ),
                           items: _roles
                               .map(
                                 (role) => DropdownMenuItem<int>(
                                   value: role.id,
-                                  child: Text(role.roleName),
+                                  child: Text(
+                                    role.roleName,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                               )
                               .toList(),
                           validator: (value) =>
                               value == null ? 'Please select Role' : null,
-                          onChanged: (value) {
-                            if (value == null) return;
-                            final role = _roles.firstWhere(
-                              (item) => item.id == value,
-                              orElse: () =>
-                                  RoleOption(id: value, roleName: ''),
-                            );
-                            setState(() {
-                              _selectedRoleId = value;
-                              _selectedRole = role.roleName;
-                            });
-                          },
+                          onChanged: _loadingRoles || _roles.isEmpty
+                              ? null
+                              : (value) {
+                                  if (value == null) return;
+                                  final role = _roles.firstWhere(
+                                    (item) => item.id == value,
+                                    orElse: () =>
+                                        RoleOption(id: value, roleName: ''),
+                                  );
+                                  setState(() {
+                                    _selectedRoleId = value;
+                                    _selectedRole = role.roleName;
+                                  });
+                                },
                         ),
+                        if (_loadingRoles)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 8),
+                            child: LinearProgressIndicator(minHeight: 3),
+                          ),
+                        if (_roleLoadError != null)
+                          _inlineError(
+                            _roleLoadError!,
+                            actionLabel: _selectedProjectId == null
+                                ? null
+                                : 'Retry',
+                            onPressed: _selectedProjectId == null
+                                ? null
+                                : () => _loadRoles(_selectedProjectId!),
+                          ),
+                        if (!_loadingRoles &&
+                            _selectedProjectId != null &&
+                            _roles.isEmpty &&
+                            _roleLoadError == null)
+                          _inlineError(
+                            'No public roles are available for this project.',
+                            actionLabel: 'Retry',
+                            onPressed: () => _loadRoles(_selectedProjectId!),
+                          ),
                         const SizedBox(height: 20),
                         _otpPanel(),
                         const SizedBox(height: 22),
@@ -655,6 +768,55 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _inlineError(
+    String message, {
+    String? actionLabel,
+    VoidCallback? onPressed,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF1F2),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFFDA4AF)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(
+              Icons.error_outline_rounded,
+              color: Color(0xFFE11D48),
+              size: 18,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(
+                  color: Color(0xFF9F1239),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            if (actionLabel != null && onPressed != null)
+              TextButton(
+                onPressed: onPressed,
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                child: Text(actionLabel),
+              ),
+          ],
+        ),
       ),
     );
   }

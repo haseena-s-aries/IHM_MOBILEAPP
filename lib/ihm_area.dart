@@ -331,10 +331,11 @@ class IhmSamplingPhoto {
   final String? localFilePath;
   final String? caption;
   final bool showInAppendixThree;
-final int appendixThreeSortOrder;
-final String? appendixThreeEditedFilePath;
-final int? appendixThreeWidth;
-final int? appendixThreeHeight;
+  final int appendixThreeSortOrder;
+  final String? appendixThreeEditedFilePath;
+  final String? appendixThreeEditedLocalFilePath;
+  final int? appendixThreeWidth;
+  final int? appendixThreeHeight;
 
   IhmSamplingPhoto({
     required this.id,
@@ -344,6 +345,7 @@ final int? appendixThreeHeight;
     this.showInAppendixThree = false,
     this.appendixThreeSortOrder = 0,
     this.appendixThreeEditedFilePath,
+    this.appendixThreeEditedLocalFilePath,
     this.appendixThreeWidth,
     this.appendixThreeHeight,
   });
@@ -354,11 +356,33 @@ final int? appendixThreeHeight;
       filePath: json['filePath']?.toString() ?? '',
       localFilePath: json['localFilePath']?.toString(),
       caption: json['caption']?.toString(),
-      showInAppendixThree: json['showInAppendixThree'] == true || json['ShowInAppendixThree'] == true,
-      appendixThreeSortOrder: int.tryParse((json['appendixThreeSortOrder'] ?? json['AppendixThreeSortOrder'] ?? 0).toString()) ?? 0,
-      appendixThreeEditedFilePath: (json['appendixThreeEditedFilePath'] ?? json['AppendixThreeEditedFilePath'])?.toString(),
-      appendixThreeWidth: int.tryParse((json['appendixThreeWidth'] ?? json['AppendixThreeWidth'] ?? '').toString()),
-      appendixThreeHeight: int.tryParse((json['appendixThreeHeight'] ?? json['AppendixThreeHeight'] ?? '').toString()),
+      showInAppendixThree:
+          json['showInAppendixThree'] == true ||
+          json['ShowInAppendixThree'] == true,
+      appendixThreeSortOrder:
+          int.tryParse(
+            (json['appendixThreeSortOrder'] ??
+                    json['AppendixThreeSortOrder'] ??
+                    0)
+                .toString(),
+          ) ??
+          0,
+      appendixThreeEditedFilePath:
+          (json['appendixThreeEditedFilePath'] ??
+                  json['AppendixThreeEditedFilePath'])
+              ?.toString(),
+      appendixThreeEditedLocalFilePath:
+          (json['appendixThreeEditedLocalFilePath'] ??
+                  json['AppendixThreeEditedLocalFilePath'])
+              ?.toString(),
+      appendixThreeWidth: int.tryParse(
+        (json['appendixThreeWidth'] ?? json['AppendixThreeWidth'] ?? '')
+            .toString(),
+      ),
+      appendixThreeHeight: int.tryParse(
+        (json['appendixThreeHeight'] ?? json['AppendixThreeHeight'] ?? '')
+            .toString(),
+      ),
     );
   }
   Map<String, dynamic> toLocalMap({
@@ -367,6 +391,7 @@ final int? appendixThreeHeight;
     int? areaId,
     int? localId,
     String? localFilePath,
+    String? appendixThreeEditedLocalFilePath,
     int synced = 1,
   }) => {
     'id': localId ?? id,
@@ -378,10 +403,11 @@ final int? appendixThreeHeight;
     'localFilePath': localFilePath,
     'caption': caption,
     'showInAppendixThree': showInAppendixThree ? 1 : 0,
-'appendixThreeSortOrder': appendixThreeSortOrder,
-'appendixThreeEditedFilePath': appendixThreeEditedFilePath,
-'appendixThreeWidth': appendixThreeWidth,
-'appendixThreeHeight': appendixThreeHeight,
+    'appendixThreeSortOrder': appendixThreeSortOrder,
+    'appendixThreeEditedFilePath': appendixThreeEditedFilePath,
+    'appendixThreeEditedLocalFilePath': appendixThreeEditedLocalFilePath,
+    'appendixThreeWidth': appendixThreeWidth,
+    'appendixThreeHeight': appendixThreeHeight,
     'deleted': 0,
     'synced': synced,
     'updatedAt': DateTime.now().toIso8601String(),

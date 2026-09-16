@@ -63,6 +63,7 @@ class _IhmAreasScreenState extends State<IhmAreasScreen> {
   final Map<int, bool> _uploadingLayout = {};
   late Future<List<IhmArea>> _areasFuture;
   bool _isLoggingOut = false;
+  String _lastSyncState = '';
 
   _TC get _c =>
       context.watch<ThemeNotifier>().isDarkMode ? _TC.dark : _TC.light;
@@ -82,6 +83,25 @@ class _IhmAreasScreenState extends State<IhmAreasScreen> {
   void initState() {
     super.initState();
     _areasFuture = IhmOfflineService.getAreasForJob(widget.job.id);
+    SyncService.syncStatus.addListener(_handleSyncStatusChanged);
+  }
+
+  @override
+  void dispose() {
+    SyncService.syncStatus.removeListener(_handleSyncStatusChanged);
+    super.dispose();
+  }
+
+  void _handleSyncStatusChanged() {
+    final snapshot = SyncService.syncStatus.value;
+    if (snapshot.isSyncing || snapshot.state == _lastSyncState) return;
+    _lastSyncState = snapshot.state;
+    if (snapshot.state == 'synced' || snapshot.state == 'failed') {
+      if (!mounted) return;
+      setState(() {
+        _areasFuture = IhmOfflineService.getLocalAreas(widget.job.id);
+      });
+    }
   }
 
   void _refreshAreas() {

@@ -188,7 +188,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     try {
       if (syncOfflineData) {
         await SyncService.syncAllOfflineData();
-        await SyncService.syncFromServerToLocal();
       }
       await _fetchPendingCount();
       await _fetchCertificateReport();
@@ -214,7 +213,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         content: Text(
           isSuccess ? 'Sync successful' : (snapshot.message ?? snapshot.label),
         ),
-        action: snapshot.failedCount > 0
+        action: snapshot.failedCount > 0 || snapshot.state == 'failed'
             ? SnackBarAction(label: 'Retry', onPressed: () => _runManualSync())
             : null,
       ),
@@ -550,7 +549,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return RefreshIndicator(
       onRefresh: () async {
         await SyncService.syncAllOfflineData();
-        await SyncService.syncFromServerToLocal();
         await _fetchCertificateReport();
       },
       child: SingleChildScrollView(
@@ -1982,7 +1980,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return RefreshIndicator(
       onRefresh: () async {
         await SyncService.syncAllOfflineData();
-        await SyncService.syncFromServerToLocal();
         await _fetchCertificateReport();
       },
       child: SingleChildScrollView(
@@ -3326,7 +3323,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               },
                         icon: const Icon(Icons.sync_rounded),
                         label: Text(
-                          snapshot.failedCount > 0 ? 'Retry' : 'Sync now',
+                          snapshot.failedCount > 0 || snapshot.state == 'failed'
+                              ? 'Retry'
+                              : 'Sync now',
                         ),
                       ),
                     ),

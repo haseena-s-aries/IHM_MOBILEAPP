@@ -320,6 +320,7 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
             ),
           ),
           body: TabBarView(
+            physics: const NeverScrollableScrollPhysics(),
             children: [
               _DetailsTab(
                 checkpoint: checkpoint,
@@ -626,6 +627,7 @@ class _AreaTabState extends State<_AreaTab> {
   List<IhmMarker> markers = [];
   bool loading = true;
   bool savingMarker = false;
+  bool _online = false;
 
   String? layoutError;
   int _loadSeq = 0;
@@ -696,18 +698,48 @@ class _AreaTabState extends State<_AreaTab> {
   }
 
   String? _localLayoutPath(String? path) {
-    final localPath = _layoutForPath(path)?.localFilePath;
+    final layout = _layoutForPath(path);
+    final localPath = layout?.localFilePath;
     if (localPath == null || localPath.trim().isEmpty) return null;
     final file = File(localPath);
-    return file.existsSync() ? localPath : null;
+    final exists = file.existsSync();
+    debugPrint(
+      '[IHM offline image] area layout id=${layout?.id} '
+      'remote=${layout?.filePath ?? path} local=$localPath exists=$exists',
+    );
+    return exists ? localPath : null;
   }
 
-  ImageProvider _layoutImageProvider(String path) {
+  ImageProvider? _layoutImageProvider(String path) {
     final localPath = _localLayoutPath(path);
     if (localPath != null) {
       return FileImage(File(localPath));
     }
+    if (!_online) return null;
     return NetworkImage(ApiService.fileUrl(path));
+  }
+
+  Widget _buildLayoutImage(
+    String path, {
+    double? width,
+    double? height,
+    BoxFit fit = BoxFit.contain,
+  }) {
+    final provider = _layoutImageProvider(path);
+    if (provider == null) {
+      return _offlineImagePlaceholder(width: width, height: height);
+    }
+
+    return Image(
+      image: provider,
+      width: width,
+      height: height,
+      fit: fit,
+      filterQuality: FilterQuality.medium,
+      isAntiAlias: true,
+      errorBuilder: (_, __, ___) =>
+          _offlineImagePlaceholder(width: width, height: height),
+    );
   }
 
   Widget _offlineImagePlaceholder({double? width, double? height}) {
@@ -740,6 +772,7 @@ class _AreaTabState extends State<_AreaTab> {
 
   Future<void> _loadLayoutImageSize(String path) async {
     final provider = _layoutImageProvider(path);
+    if (provider == null) return;
     final stream = provider.resolve(const ImageConfiguration());
     late ImageStreamListener listener;
 
@@ -799,6 +832,22 @@ class _AreaTabState extends State<_AreaTab> {
     super.dispose();
   }
 
+  void _zoomLayout(double factor) {
+    final currentScale = _controller.value.getMaxScaleOnAxis();
+    if (currentScale <= 0) {
+      _controller.value = Matrix4.identity();
+      return;
+    }
+
+    final nextScale = (currentScale * factor).clamp(0.5, 8.0).toDouble();
+    final scaleDelta = nextScale / currentScale;
+    _controller.value = _controller.value.clone()..scale(scaleDelta);
+  }
+
+  void _resetLayoutZoom() {
+    _controller.value = Matrix4.identity();
+  }
+
   Future<void> _load() async {
     final seq = ++_loadSeq;
     final jobId = widget.checkpoint.surveyJobId;
@@ -806,6 +855,7 @@ class _AreaTabState extends State<_AreaTab> {
 
     List<IhmLayoutImage> layouts = [];
     String? loadError;
+    final online = await IhmOfflineService.isOnline;
     try {
       layouts = await IhmOfflineService.getLayouts(jobId, areaId);
     } catch (e) {
@@ -822,6 +872,7 @@ class _AreaTabState extends State<_AreaTab> {
       setState(() {
         layoutImages = layouts;
         layoutError = loadError;
+        _online = online;
         imagePath = layouts.isNotEmpty
             ? layouts.first.filePath
             : (jobMarkers.isNotEmpty ? jobMarkers.first.imagePath : null);
@@ -1031,12 +1082,22 @@ class _AreaTabState extends State<_AreaTab> {
     }
 
     if (imagePath!.toLowerCase().endsWith('.pdf')) {
-      return SfPdfViewer.network(
-        ApiService.fileUrl(imagePath!),
-        canShowScrollHead: true,
-        canShowScrollStatus: true,
-        enableDoubleTapZooming: true,
-      );
+      final localPdfPath = _localLayoutPath(imagePath!);
+      return localPdfPath != null
+          ? SfPdfViewer.file(
+              File(localPdfPath),
+              canShowScrollHead: true,
+              canShowScrollStatus: true,
+              enableDoubleTapZooming: true,
+            )
+          : _online
+          ? SfPdfViewer.network(
+              ApiService.fileUrl(imagePath!),
+              canShowScrollHead: true,
+              canShowScrollStatus: true,
+              enableDoubleTapZooming: true,
+            )
+          : _offlineImagePlaceholder();
     }
 
     return ClipRect(
@@ -1075,50 +1136,7 @@ class _AreaTabState extends State<_AreaTab> {
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    Positioned.fill(
-                      child: Image(
-                        image: _layoutImageProvider(imagePath!),
-                        fit: BoxFit.contain,
-                        filterQuality: FilterQuality.medium,
-                        isAntiAlias: true,
-                        errorBuilder: (_, error, __) => Container(
-                          color: _c.bgCardAlt,
-                          alignment: Alignment.center,
-                          padding: const EdgeInsets.all(24),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.broken_image_outlined,
-                                color: _A.accentRed,
-                                size: 42,
-                              ),
-                              const SizedBox(height: 10),
-                              Text(
-                                'Attachment found, but the image could not be opened.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: _c.textPrimary,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                _localLayoutPath(imagePath!) ??
-                                    ApiService.fileUrl(imagePath!),
-                                textAlign: TextAlign.center,
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: _c.textSecond,
-                                  fontSize: 10,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
+                    Positioned.fill(child: _buildLayoutImage(imagePath!)),
 
                     for (final marker in _visibleMarkers)
                       Builder(
@@ -1186,6 +1204,17 @@ class _AreaTabState extends State<_AreaTab> {
                           ),
                         ),
                       ),
+
+                    Positioned(
+                      top: 12,
+                      right: 12,
+                      child: _LayoutZoomControls(
+                        colorSet: _c,
+                        onZoomIn: () => _zoomLayout(1.35),
+                        onZoomOut: () => _zoomLayout(0.75),
+                        onReset: _resetLayoutZoom,
+                      ),
+                    ),
 
                     Positioned(
                       bottom: 16,
@@ -1304,16 +1333,11 @@ class _AreaTabState extends State<_AreaTab> {
                                   color: _A.accentRed,
                                 ),
                               )
-                            : Image(
-                                image: _layoutImageProvider(layout.filePath),
+                            : _buildLayoutImage(
+                                layout.filePath,
                                 width: 58,
                                 height: 48,
                                 fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) =>
-                                    _offlineImagePlaceholder(
-                                      width: 58,
-                                      height: 48,
-                                    ),
                               ),
                       ),
 
@@ -1350,6 +1374,82 @@ class _AreaTabState extends State<_AreaTab> {
 }
 
 // ─── Images Tab ───────────────────────────────────────────────────────────────
+class _LayoutZoomControls extends StatelessWidget {
+  final _TC colorSet;
+  final VoidCallback onZoomIn;
+  final VoidCallback onZoomOut;
+  final VoidCallback onReset;
+
+  const _LayoutZoomControls({
+    required this.colorSet,
+    required this.onZoomIn,
+    required this.onZoomOut,
+    required this.onReset,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: colorSet.bgCard.withOpacity(0.94),
+      elevation: 4,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: colorSet.divider),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _zoomButton(
+              icon: Icons.remove_rounded,
+              tooltip: 'Zoom out',
+              onPressed: onZoomOut,
+            ),
+            _divider(),
+            _zoomButton(
+              icon: Icons.center_focus_strong_rounded,
+              tooltip: 'Reset zoom',
+              onPressed: onReset,
+            ),
+            _divider(),
+            _zoomButton(
+              icon: Icons.add_rounded,
+              tooltip: 'Zoom in',
+              onPressed: onZoomIn,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _divider() => Container(
+    width: 1,
+    height: 24,
+    color: colorSet.divider,
+  );
+
+  Widget _zoomButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onPressed,
+        child: SizedBox(
+          width: 38,
+          height: 38,
+          child: Icon(icon, size: 20, color: colorSet.textPrimary),
+        ),
+      ),
+    );
+  }
+}
+
 class _ImagesTab extends StatefulWidget {
   final IhmCheckpoint checkpoint;
   final bool isDark;
@@ -1365,6 +1465,7 @@ class _ImagesTabState extends State<_ImagesTab> {
   List<IhmSamplingPhoto> photos = [];
   bool loading = true;
   bool uploading = false;
+  bool _online = false;
 
   _TC get _c => widget.isDark ? _TC.dark : _TC.light;
 
@@ -1386,8 +1487,30 @@ class _ImagesTabState extends State<_ImagesTab> {
     return photo.filePath;
   }
 
+  String? _localPhotoPath(IhmSamplingPhoto photo) {
+    final displayPath = _displayPhotoPath(photo);
+    final candidates = <String?>[
+      if (displayPath == photo.appendixThreeEditedFilePath)
+        photo.appendixThreeEditedLocalFilePath,
+      photo.localFilePath,
+    ];
+
+    for (final path in candidates) {
+      if (path == null || path.trim().isEmpty) continue;
+      final exists = File(path).existsSync();
+      debugPrint(
+        '[IHM offline image] checkpoint photo id=${photo.id} '
+        'remote=$displayPath local=$path exists=$exists',
+      );
+      if (exists) return path;
+    }
+
+    return null;
+  }
+
   Future<void> _loadPhotos() async {
     try {
+      final online = await IhmOfflineService.isOnline;
       final result = await IhmOfflineService.getCheckpointPhotos(
         widget.checkpoint,
       );
@@ -1395,6 +1518,7 @@ class _ImagesTabState extends State<_ImagesTab> {
       if (!mounted) return;
       setState(() {
         photos = result;
+        _online = online;
         loading = false;
       });
     } catch (e) {
@@ -1469,23 +1593,20 @@ class _ImagesTabState extends State<_ImagesTab> {
       selectedIds.add(photo.id);
     }
 
-    final updated = await ApiService.saveAppendixThreeSelection(
+    await ApiService.saveAppendixThreeSelection(
       checkpointId: widget.checkpoint.id,
       photoIds: selectedIds,
     );
 
     if (!mounted) return;
-    setState(() => photos = updated);
+    await _loadPhotos();
   }
 
   Future<void> _editAppendixThreeImage(IhmSamplingPhoto photo) async {
-    final saved = await ApiService.rotateAppendixThreeImage(photoId: photo.id);
+    await ApiService.rotateAppendixThreeImage(photoId: photo.id);
 
     if (!mounted) return;
-    setState(() {
-      final index = photos.indexWhere((x) => x.id == saved.id);
-      if (index >= 0) photos[index] = saved;
-    });
+    await _loadPhotos();
   }
 
   void _showImageOptions() {
@@ -1556,17 +1677,19 @@ class _ImagesTabState extends State<_ImagesTab> {
 
   Widget _buildPhotoImage(IhmSamplingPhoto photo) {
     final imageWidget = () {
-      final localPath = photo.localFilePath;
+      final resolvedLocalPath = _localPhotoPath(photo);
 
-      if (localPath != null && localPath.isNotEmpty) {
+      if (resolvedLocalPath != null) {
         return Image.file(
-          File(localPath),
+          File(resolvedLocalPath),
           width: double.infinity,
           height: double.infinity,
           fit: BoxFit.contain,
           errorBuilder: (_, __, ___) => _brokenPhoto(),
         );
       }
+
+      if (!_online) return _offlinePhotoPlaceholder();
 
       return Image.network(
         ApiService.fileUrl(_displayPhotoPath(photo)),

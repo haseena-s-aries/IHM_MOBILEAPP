@@ -54,6 +54,32 @@ class ApiService {
     return {'status': response.statusCode, 'message': fallbackMessage};
   }
 
+  static String _responseErrorMessage(
+    http.Response response, {
+    required String fallbackMessage,
+  }) {
+    final body = response.body.trim();
+    if (body.isEmpty) return fallbackMessage;
+
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        return decoded['message']?.toString() ??
+            decoded['Message']?.toString() ??
+            decoded['title']?.toString() ??
+            decoded['Title']?.toString() ??
+            fallbackMessage;
+      }
+      if (decoded is String && decoded.trim().isNotEmpty) {
+        return decoded.trim();
+      }
+    } catch (_) {
+      // The API can return plain text for some validation errors.
+    }
+
+    return body;
+  }
+
   static Future<List<AppNotification>> fetchUserNotifications(
     int userId, {
     bool unreadOnly = false,
@@ -492,7 +518,12 @@ static Future<List<Map<String, dynamic>>> fetchReportRemarks() async {
     );
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception(response.body);
+      throw Exception(
+        _responseErrorMessage(
+          response,
+          fallbackMessage: 'Failed to update vessel.',
+        ),
+      );
     }
   }
 
@@ -1061,7 +1092,12 @@ static Future<List<Map<String, dynamic>>> fetchReportRemarks() async {
     );
 
     if (response.statusCode != 200 && response.statusCode != 201) {
-      throw Exception('Failed to create vessel: ${response.body}');
+      throw Exception(
+        _responseErrorMessage(
+          response,
+          fallbackMessage: 'Failed to create vessel.',
+        ),
+      );
     }
 
     return Vessel.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
@@ -1779,14 +1815,17 @@ static Future<List<Map<String, dynamic>>> fetchReportRemarks() async {
     );
 
     if (response.statusCode == 200) {
-      final List<dynamic> jsonList = jsonDecode(response.body);
+      final jsonList = _decodeListResponse(response.body);
       return jsonList
           .map((e) => RoleOption.fromJson(e as Map<String, dynamic>))
           .where((role) => role.id > 0 && role.roleName.isNotEmpty)
           .toList();
     }
 
-    throw Exception("Failed to load roles: ${response.body}");
+    throw Exception(_responseErrorMessage(
+      response,
+      fallbackMessage: 'Failed to load roles.',
+    ));
   }
 
   static Future<List<PendingUser>> fetchPendingUsers() async {
@@ -1830,18 +1869,30 @@ static Future<List<Map<String, dynamic>>> fetchReportRemarks() async {
   static Future<List<ProjectOption>> fetchProjects() async {
     final response = await http.get(
       Uri.parse('$baseUrl/User/projects'),
-      headers: await _authHeaders(),
     );
 
     if (response.statusCode == 200) {
-      final List<dynamic> jsonList = jsonDecode(response.body);
+      final jsonList = _decodeListResponse(response.body);
       return jsonList
           .map((e) => ProjectOption.fromJson(e as Map<String, dynamic>))
-          .where((project) => project.id > 0)
+          .where((project) => project.id > 0 && project.name.trim().isNotEmpty)
           .toList();
     }
 
-    throw Exception("Failed to load projects: ${response.body}");
+    throw Exception(_responseErrorMessage(
+      response,
+      fallbackMessage: 'Failed to load projects.',
+    ));
+  }
+
+  static List<dynamic> _decodeListResponse(String body) {
+    final decoded = jsonDecode(body);
+    if (decoded is List) return decoded;
+    if (decoded is Map<String, dynamic>) {
+      final data = decoded['data'] ?? decoded['Data'] ?? decoded['items'];
+      if (data is List) return data;
+    }
+    return <dynamic>[];
   }
 
   static Future<List<ProjectOption>> fetchManageableProjects() async {
@@ -2012,7 +2063,11 @@ static Future<List<Map<String, dynamic>>> fetchReportRemarks() async {
     );
 
     if (response.statusCode != 200) {
-      throw Exception('Failed to download VSCP Checklist: ${response.body}');
+      final body = response.body.trim();
+      final reason = response.statusCode == 404
+          ? 'server file missing (404)'
+          : '${response.statusCode}${body.isEmpty ? '' : ' - $body'}';
+      throw Exception('Failed to download VSCP Checklist: $reason');
     }
 
     return response.bodyBytes;

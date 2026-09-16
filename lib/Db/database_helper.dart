@@ -29,7 +29,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 9,
+      version: 11,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -209,6 +209,64 @@ class DatabaseHelper {
         definition: "TEXT DEFAULT 'Pending'",
       );
     }
+
+    if (oldVersion < 10) {
+      await _addIhmSamplingPhotoOfflineColumns(db);
+    }
+
+    if (oldVersion < 11) {
+      await _addColumnIfMissing(
+        db,
+        tableName: 'ihm_sampling_photos',
+        columnName: 'appendixThreeEditedLocalFilePath',
+        definition: 'TEXT',
+      );
+    }
+  }
+
+  Future<void> _addIhmSamplingPhotoOfflineColumns(Database db) async {
+    await _addColumnIfMissing(
+      db,
+      tableName: 'ihm_sampling_photos',
+      columnName: 'localFilePath',
+      definition: 'TEXT',
+    );
+    await _addColumnIfMissing(
+      db,
+      tableName: 'ihm_sampling_photos',
+      columnName: 'showInAppendixThree',
+      definition: 'INTEGER DEFAULT 0',
+    );
+    await _addColumnIfMissing(
+      db,
+      tableName: 'ihm_sampling_photos',
+      columnName: 'appendixThreeSortOrder',
+      definition: 'INTEGER DEFAULT 0',
+    );
+    await _addColumnIfMissing(
+      db,
+      tableName: 'ihm_sampling_photos',
+      columnName: 'appendixThreeEditedFilePath',
+      definition: 'TEXT',
+    );
+    await _addColumnIfMissing(
+      db,
+      tableName: 'ihm_sampling_photos',
+      columnName: 'appendixThreeEditedLocalFilePath',
+      definition: 'TEXT',
+    );
+    await _addColumnIfMissing(
+      db,
+      tableName: 'ihm_sampling_photos',
+      columnName: 'appendixThreeWidth',
+      definition: 'INTEGER',
+    );
+    await _addColumnIfMissing(
+      db,
+      tableName: 'ihm_sampling_photos',
+      columnName: 'appendixThreeHeight',
+      definition: 'INTEGER',
+    );
   }
 
   Future<void> _addColumnIfMissing(
@@ -363,6 +421,12 @@ class DatabaseHelper {
         filePath TEXT,
         localFilePath TEXT,
         caption TEXT,
+        showInAppendixThree INTEGER DEFAULT 0,
+        appendixThreeSortOrder INTEGER DEFAULT 0,
+        appendixThreeEditedFilePath TEXT,
+        appendixThreeEditedLocalFilePath TEXT,
+        appendixThreeWidth INTEGER,
+        appendixThreeHeight INTEGER,
         deleted INTEGER DEFAULT 0,
         synced INTEGER DEFAULT 1,
         updatedAt TEXT
