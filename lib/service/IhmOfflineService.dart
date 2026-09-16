@@ -97,7 +97,9 @@ class IhmOfflineService {
     required Set<int> latestCheckpointIds,
   }) async {
     final areaPlaceholders = latestAreaIds.map((_) => '?').join(',');
-    final checkpointPlaceholders = latestCheckpointIds.map((_) => '?').join(',');
+    final checkpointPlaceholders = latestCheckpointIds
+        .map((_) => '?')
+        .join(',');
 
     if (latestCheckpointIds.isEmpty) {
       await txn.delete(
@@ -467,32 +469,28 @@ class IhmOfflineService {
     };
 
     final existingRows = await db.query(
-  'ihm_markers',
-  columns: ['id', 'imagePath'],
-  where:
-      'surveyJobId = ? AND ihmAreaId = ? AND ihmCheckpointId = ? AND deleted = 0',
-  whereArgs: [
-    checkpoint.surveyJobId,
-    checkpoint.ihmAreaId,
-    checkpoint.id,
-  ],
-);
+      'ihm_markers',
+      columns: ['id', 'imagePath'],
+      where:
+          'surveyJobId = ? AND ihmAreaId = ? AND ihmCheckpointId = ? AND deleted = 0',
+      whereArgs: [checkpoint.surveyJobId, checkpoint.ihmAreaId, checkpoint.id],
+    );
 
-String norm(String? path) {
-  final value = (path ?? '').trim();
-  final parsed = Uri.tryParse(value);
-  if (parsed != null && parsed.hasScheme) {
-    return parsed.path.replaceFirst(RegExp(r'^/+'), '').toLowerCase();
-  }
-  return value
-      .replaceFirst(RegExp(r'^https?://[^/]+', caseSensitive: false), '')
-      .replaceFirst(RegExp(r'^/+'), '')
-      .toLowerCase();
-}
+    String norm(String? path) {
+      final value = (path ?? '').trim();
+      final parsed = Uri.tryParse(value);
+      if (parsed != null && parsed.hasScheme) {
+        return parsed.path.replaceFirst(RegExp(r'^/+'), '').toLowerCase();
+      }
+      return value
+          .replaceFirst(RegExp(r'^https?://[^/]+', caseSensitive: false), '')
+          .replaceFirst(RegExp(r'^/+'), '')
+          .toLowerCase();
+    }
 
-final existing = existingRows
-    .where((row) => norm(row['imagePath']?.toString()) == norm(imagePath))
-    .toList();
+    final existing = existingRows
+        .where((row) => norm(row['imagePath']?.toString()) == norm(imagePath))
+        .toList();
 
     final int localId;
     if (existing.isNotEmpty) {
@@ -578,31 +576,31 @@ final existing = existingRows
     await syncPendingIhmData();
   }
 
-static Future<List<IhmSamplingPhoto>> getCheckpointPhotos(
-  IhmCheckpoint checkpoint,
-) async {
-  if (kIsWeb) {
-    return ApiService.fetchCheckpointPhotos(checkpoint.id);
-  }
-
-  if (await isOnline) {
-    try {
-      final photos = await ApiService.fetchCheckpointPhotos(checkpoint.id);
-
-      try {
-        await _cachePhotos(checkpoint, photos);
-      } catch (_) {
-        // Cache failure should not hide server images from mobile UI.
-      }
-
-      return photos;
-    } catch (_) {
-      // Offline/fetch failed: fall back to local cache.
+  static Future<List<IhmSamplingPhoto>> getCheckpointPhotos(
+    IhmCheckpoint checkpoint,
+  ) async {
+    if (kIsWeb) {
+      return ApiService.fetchCheckpointPhotos(checkpoint.id);
     }
-  }
 
-  return getLocalCheckpointPhotos(checkpoint.id);
-}
+    if (await isOnline) {
+      try {
+        final photos = await ApiService.fetchCheckpointPhotos(checkpoint.id);
+
+        try {
+          await _cachePhotos(checkpoint, photos);
+        } catch (_) {
+          // Cache failure should not hide server images from mobile UI.
+        }
+
+        return photos;
+      } catch (_) {
+        // Offline/fetch failed: fall back to local cache.
+      }
+    }
+
+    return getLocalCheckpointPhotos(checkpoint.id);
+  }
 
   static Future<List<IhmSamplingPhoto>> getLocalCheckpointPhotos(
     int checkpointId,
@@ -668,7 +666,6 @@ static Future<List<IhmSamplingPhoto>> getCheckpointPhotos(
       operation: 'upload',
       payload: {'localId': localId},
     );
-
 
     final rows = await db.query(
       'ihm_sampling_photos',
@@ -797,8 +794,9 @@ static Future<List<IhmSamplingPhoto>> getCheckpointPhotos(
 
     var cachedJobs = 0;
     final failures = <String>[];
-    final hasVscpChecklist =
-        (job.vscpChecklistFilePath ?? '').trim().isNotEmpty;
+    final hasVscpChecklist = (job.vscpChecklistFilePath ?? '')
+        .trim()
+        .isNotEmpty;
 
     if (hasVscpChecklist) {
       try {
@@ -836,16 +834,16 @@ static Future<List<IhmSamplingPhoto>> getCheckpointPhotos(
       }
     }).toList();
 
-    final photoTasks = areas
-        .expand((area) => area.checkpoints)
-        .map((checkpoint) async {
-        try {
-          final photos = await ApiService.fetchCheckpointPhotos(checkpoint.id);
-          await _cachePhotos(checkpoint, photos, failures: failures);
-        } catch (error) {
-          failures.add('Photos ${checkpoint.sampleNo}: $error');
-        }
-      }).toList();
+    final photoTasks = areas.expand((area) => area.checkpoints).map((
+      checkpoint,
+    ) async {
+      try {
+        final photos = await ApiService.fetchCheckpointPhotos(checkpoint.id);
+        await _cachePhotos(checkpoint, photos, failures: failures);
+      } catch (error) {
+        failures.add('Photos ${checkpoint.sampleNo}: $error');
+      }
+    }).toList();
 
     await markerTask;
     await _runInBatches(layoutTasks, _parallelFetchLimit);
@@ -906,18 +904,14 @@ static Future<List<IhmSamplingPhoto>> getCheckpointPhotos(
     );
     final now = DateTime.now().toIso8601String();
 
-    await db.insert(
-      'ihm_cached_files',
-      {
-        'surveyJobId': jobId,
-        'fileType': 'vscpChecklist',
-        'serverPath': pathKey,
-        'localPath': localPath,
-        'fileName': fileName,
-        'updatedAt': now,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('ihm_cached_files', {
+      'surveyJobId': jobId,
+      'fileType': 'vscpChecklist',
+      'serverPath': pathKey,
+      'localPath': localPath,
+      'fileName': fileName,
+      'updatedAt': now,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   static Future<String?> getCachedVscpChecklistLocalPath(int jobId) async {
@@ -1074,26 +1068,26 @@ static Future<List<IhmSamplingPhoto>> getCheckpointPhotos(
         fileName: localPath.split(RegExp(r'[\\/]')).last,
       );
 
-   await db.delete(
-  'ihm_sampling_photos',
-  where: '(serverId = ? OR id = ?) AND id != ?',
-  whereArgs: [uploaded.id, uploaded.id, localId],
-);
+      await db.delete(
+        'ihm_sampling_photos',
+        where: '(serverId = ? OR id = ?) AND id != ?',
+        whereArgs: [uploaded.id, uploaded.id, localId],
+      );
 
-await db.update(
-  'ihm_sampling_photos',
-  uploaded.toLocalMap(
-    surveyJobId: checkpoint.surveyJobId,
-    checkpointId: checkpoint.id,
-    areaId: checkpoint.ihmAreaId,
-    localId: localId,
-    localFilePath: localPath,
-    synced: 1,
-  ),
-  where: 'id = ?',
-  whereArgs: [localId],
-);
-return;
+      await db.update(
+        'ihm_sampling_photos',
+        uploaded.toLocalMap(
+          surveyJobId: checkpoint.surveyJobId,
+          checkpointId: checkpoint.id,
+          areaId: checkpoint.ihmAreaId,
+          localId: localId,
+          localFilePath: localPath,
+          synced: 1,
+        ),
+        where: 'id = ?',
+        whereArgs: [localId],
+      );
+      return;
     }
   }
 
@@ -1166,7 +1160,8 @@ return;
               folderName: 'ihm_sampling_photos',
               requiredForOffline: true,
               failures: failures,
-              label: 'Checkpoint ${checkpoint.sampleNo} edited photo ${photo.id}',
+              label:
+                  'Checkpoint ${checkpoint.sampleNo} edited photo ${photo.id}',
             )
           : existingEditedLocalPath;
 
@@ -1241,22 +1236,18 @@ return;
         label: layout.isCommon ? 'Common layout' : 'Area $areaId layout',
       );
 
-      await db.insert(
-        'ihm_layout_images',
-        {
-          'id': layout.id,
-          'surveyJobId': jobId,
-          'ihmAreaId': layout.ihmAreaId,
-          'filePath': layout.filePath,
-          'localFilePath': localPath,
-          'originalFileName': layout.originalFileName,
-          'contentType': layout.contentType,
-          'isCommon': layout.isCommon ? 1 : 0,
-          'synced': 1,
-          'updatedAt': DateTime.now().toIso8601String(),
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      await db.insert('ihm_layout_images', {
+        'id': layout.id,
+        'surveyJobId': jobId,
+        'ihmAreaId': layout.ihmAreaId,
+        'filePath': layout.filePath,
+        'localFilePath': localPath,
+        'originalFileName': layout.originalFileName,
+        'contentType': layout.contentType,
+        'isCommon': layout.isCommon ? 1 : 0,
+        'synced': 1,
+        'updatedAt': DateTime.now().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
   }
 
@@ -1396,7 +1387,6 @@ return;
     );
   }
 
-<<<<<<< HEAD
   static IhmSamplingPhoto _photoFromLocal(Map<String, Object?> row) {
     return IhmSamplingPhoto(
       id: _int(row['id']),
@@ -1405,8 +1395,10 @@ return;
       caption: row['caption']?.toString(),
       showInAppendixThree: _int(row['showInAppendixThree']) == 1,
       appendixThreeSortOrder: _int(row['appendixThreeSortOrder']),
-      appendixThreeEditedFilePath: row['appendixThreeEditedFilePath']?.toString(),
-      appendixThreeEditedLocalFilePath: row['appendixThreeEditedLocalFilePath']?.toString(),
+      appendixThreeEditedFilePath: row['appendixThreeEditedFilePath']
+          ?.toString(),
+      appendixThreeEditedLocalFilePath: row['appendixThreeEditedLocalFilePath']
+          ?.toString(),
       appendixThreeWidth: row['appendixThreeWidth'] == null
           ? null
           : _int(row['appendixThreeWidth']),
@@ -1415,25 +1407,6 @@ return;
           : _int(row['appendixThreeHeight']),
     );
   }
-=======
- static IhmSamplingPhoto _photoFromLocal(Map<String, Object?> row) {
-  return IhmSamplingPhoto(
-    id: _int(row['serverId']) > 0 ? _int(row['serverId']) : _int(row['id']),
-    filePath: row['filePath']?.toString() ?? '',
-    localFilePath: row['localFilePath']?.toString(),
-    caption: row['caption']?.toString(),
-    showInAppendixThree: _int(row['showInAppendixThree']) == 1,
-    appendixThreeSortOrder: _int(row['appendixThreeSortOrder']),
-    appendixThreeEditedFilePath: row['appendixThreeEditedFilePath']?.toString(),
-    appendixThreeWidth: row['appendixThreeWidth'] == null
-        ? null
-        : _int(row['appendixThreeWidth']),
-    appendixThreeHeight: row['appendixThreeHeight'] == null
-        ? null
-        : _int(row['appendixThreeHeight']),
-  );
-}
->>>>>>> 85f972dd390615495a38cb273919a9c71c15685f
 
   static IhmCheckpoint _checkpointForRelatedUpload({
     required int surveyJobId,
