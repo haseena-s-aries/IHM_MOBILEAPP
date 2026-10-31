@@ -712,7 +712,9 @@ class IhmOfflineService {
     await syncPendingIhmData();
   }
 
-  static Future<void> syncPendingIhmData() async {
+  static Future<void> syncPendingIhmData({
+    void Function(int processed, int total)? onProgress,
+  }) async {
     if (kIsWeb) return;
     if (_syncing || !(await isOnline)) return;
 
@@ -725,46 +727,100 @@ class IhmOfflineService {
         where: 'status IN (0, 2)',
         orderBy: "CASE WHEN entityType = 'photo' THEN 1 ELSE 0 END, id ASC",
       );
+      final total = queue.length;
+      var processed = 0;
+      onProgress?.call(processed, total);
 
-      for (final item in queue) {
-        final queueId = _int(item['id']);
-        try {
-          await db.update(
-            'ihm_sync_queue',
-            {'status': -1, 'updatedAt': DateTime.now().toIso8601String()},
-            where: 'id = ?',
-            whereArgs: [queueId],
-          );
-
-          await _syncQueueItem(db, item);
-
-          await db.update(
-            'ihm_sync_queue',
-            {
-              'status': 1,
-              'lastError': null,
-              'updatedAt': DateTime.now().toIso8601String(),
-            },
-            where: 'id = ?',
-            whereArgs: [queueId],
-          );
-        } catch (e) {
-          await db.update(
-            'ihm_sync_queue',
-            {
-              'status': 2,
-              'lastError': e.toString(),
-              'retryCount': _int(item['retryCount']) + 1,
-              'updatedAt': DateTime.now().toIso8601String(),
-            },
-            where: 'id = ?',
-            whereArgs: [queueId],
-          );
+      // Keep checkpoint/marker updates ordered, but upload photos in small
+      // parallel batches. This avoids the very slow one-photo-at-a-time path
+      // while limiting server and device pressure.
+      for (var start = 0; start < queue.length;) {
+        final isPhoto = queue[start]['entityType']?.toString() == 'photo';
+        if (!isPhoto) {
+          await _syncQueueItemWithRetry(db, queue[start]);
+          processed++;
+          onProgress?.call(processed, total);
+          start++;
+          continue;
         }
+
+        final batch = <Map<String, Object?>>[];
+        while (start < queue.length &&
+            queue[start]['entityType']?.toString() == 'photo' &&
+            batch.length < 4) {
+          batch.add(queue[start]);
+          start++;
+        }
+
+        await Future.wait(
+          batch.map((item) async {
+            await _syncQueueItemWithRetry(db, item);
+            processed++;
+            onProgress?.call(processed, total);
+          }),
+        );
       }
     } finally {
       _syncing = false;
     }
+  }
+
+  static Future<bool> _syncQueueItemWithRetry(
+    Database db,
+    Map<String, Object?> item,
+  ) async {
+    final queueId = _int(item['id']);
+    Object? lastError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        await db.update(
+          'ihm_sync_queue',
+          {'status': -1, 'updatedAt': DateTime.now().toIso8601String()},
+          where: 'id = ?',
+          whereArgs: [queueId],
+        );
+        await _syncQueueItem(db, item);
+        await db.update(
+          'ihm_sync_queue',
+          {
+            'status': 1,
+            'lastError': null,
+            'updatedAt': DateTime.now().toIso8601String(),
+          },
+          where: 'id = ?',
+          whereArgs: [queueId],
+        );
+        return true;
+      } catch (error) {
+        lastError = error;
+        debugPrint(
+          '[IHM sync] queueId=$queueId entity=${item['entityType']} '
+          'attempt=${attempt + 1}/3 failed: $error',
+        );
+        if (attempt < 2 && await isOnline) {
+          await Future<void>.delayed(
+            Duration(milliseconds: 300 * (attempt + 1)),
+          );
+        }
+      }
+    }
+
+    await db.update(
+      'ihm_sync_queue',
+      {
+        'status': 2,
+        'lastError': lastError?.toString() ?? 'Sync failed',
+        'retryCount': _int(item['retryCount']) + 1,
+        'updatedAt': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [queueId],
+    );
+    debugPrint(
+      '[IHM sync] permanently failed queueId=$queueId '
+      'entity=${item['entityType']} error=$lastError',
+    );
+    return false;
   }
 
   static Future<int> pendingSyncCount() async {
@@ -1070,8 +1126,11 @@ class IhmOfflineService {
 
       await db.delete(
         'ihm_sampling_photos',
-        where: '(serverId = ? OR id = ?) AND id != ?',
-        whereArgs: [uploaded.id, uploaded.id, localId],
+        // Local photo IDs and server photo IDs are different namespaces.
+        // Never delete a local row merely because its local id equals the
+        // server id returned for another upload.
+        where: 'serverId = ? AND id != ?',
+        whereArgs: [uploaded.id, localId],
       );
 
       await db.update(

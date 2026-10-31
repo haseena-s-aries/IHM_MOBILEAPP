@@ -4,7 +4,7 @@ import 'package:Auras/ihm_checkpoint_detail_screen.dart';
 import 'package:Auras/model/ihm_checkpoint_submission.dart';
 import 'package:Auras/model/survey_job.dart';
 import 'package:Auras/service/IhmOfflineService.dart';
-import 'package:Auras/service/api_service.dart';       // ← ADD THIS
+import 'package:Auras/service/api_service.dart'; // ← ADD THIS
 import 'package:Auras/service/sync_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -253,8 +253,7 @@ class _IhmAreasScreenState extends State<IhmAreasScreen> {
     final double progress = a.total == 0
         ? 0
         : (a.audited / a.total).clamp(0.0, 1.0);
-    final Color accentColor =
-        progress == 1.0 ? _A.accentGreen : _A.accentAmber;
+    final Color accentColor = progress == 1.0 ? _A.accentGreen : _A.accentAmber;
     final bool uploading = _uploadingLayout[a.id] ?? false;
 
     return GestureDetector(
@@ -306,7 +305,6 @@ class _IhmAreasScreenState extends State<IhmAreasScreen> {
                     ),
                   ),
                   const SizedBox(width: 6),
-                 
                 ],
               ),
             ),
@@ -372,6 +370,7 @@ class _IhmAreasScreenState extends State<IhmAreasScreen> {
       ),
     );
   }
+
   Widget _statRow(IconData icon, String label, String value, Color color) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 5),
@@ -435,9 +434,7 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
       final grouped = <int, List<IhmCheckpointSubmission>>{};
       for (final submission in submissions) {
         if (submission.status.toLowerCase() == 'rejected') continue;
-        grouped
-            .putIfAbsent(submission.checkpointId, () => [])
-            .add(submission);
+        grouped.putIfAbsent(submission.checkpointId, () => []).add(submission);
       }
       if (!mounted) return;
       setState(() {
@@ -490,11 +487,17 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
       'equipment': TextEditingController(text: checkpoint.equipmentName ?? ''),
       'component': TextEditingController(text: checkpoint.component ?? ''),
       'hazmat': TextEditingController(text: checkpoint.hazardousMaterial ?? ''),
-      'category': TextEditingController(text: checkpoint.materialCategory ?? ''),
+      'category': TextEditingController(
+        text: checkpoint.materialCategory ?? '',
+      ),
       'tableType': TextEditingController(text: checkpoint.tableType ?? ''),
-      'quantityUnit': TextEditingController(text: checkpoint.quantityUnitKg ?? ''),
+      'quantityUnit': TextEditingController(
+        text: checkpoint.quantityUnitKg ?? '',
+      ),
       'quantityNo': TextEditingController(text: checkpoint.quantityNo ?? ''),
-      'quantityTotal': TextEditingController(text: checkpoint.quantityTotalKg ?? ''),
+      'quantityTotal': TextEditingController(
+        text: checkpoint.quantityTotalKg ?? '',
+      ),
       'manufacturer': TextEditingController(
         text: checkpoint.manufacturerBrandName ?? '',
       ),
@@ -531,18 +534,31 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
                   _editField(fields['tableType']!, 'Table Type'),
                   Row(
                     children: [
-                      Expanded(child: _editField(fields['quantityUnit']!, 'Unit Kg')),
+                      Expanded(
+                        child: _editField(fields['quantityUnit']!, 'Unit Kg'),
+                      ),
                       const SizedBox(width: 10),
-                      Expanded(child: _editField(fields['quantityNo']!, 'Quantity')),
+                      Expanded(
+                        child: _editField(fields['quantityNo']!, 'Quantity'),
+                      ),
                       const SizedBox(width: 10),
-                      Expanded(child: _editField(fields['quantityTotal']!, 'Total Kg')),
+                      Expanded(
+                        child: _editField(fields['quantityTotal']!, 'Total Kg'),
+                      ),
                     ],
                   ),
                   _editField(fields['manufacturer']!, 'Manufacturer / Brand'),
-                  _editField(fields['documentResult']!, 'Document Analysis Result'),
+                  _editField(
+                    fields['documentResult']!,
+                    'Document Analysis Result',
+                  ),
                   _editField(fields['checkResult']!, 'Check Result'),
                   _editField(fields['remarks']!, 'Remarks', lines: 2),
-                  _editField(fields['locationRemarks']!, 'Location Remarks', lines: 2),
+                  _editField(
+                    fields['locationRemarks']!,
+                    'Location Remarks',
+                    lines: 2,
+                  ),
                   DropdownButtonFormField<String>(
                     value: procedure,
                     decoration: const InputDecoration(labelText: 'Procedure'),
@@ -579,7 +595,9 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
                     fields['description']!.text.trim().isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Checkpoint code and description are required.'),
+                      content: Text(
+                        'Checkpoint code and description are required.',
+                      ),
                     ),
                   );
                   return;
@@ -607,7 +625,9 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
                   isPchm: isPchm,
                 );
                 try {
-                  final saved = await IhmOfflineService.saveFullCheckpoint(value);
+                  final saved = await IhmOfflineService.saveFullCheckpoint(
+                    value,
+                  );
                   if (dialogContext.mounted) {
                     Navigator.pop(dialogContext, saved);
                   }
@@ -780,10 +800,7 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
       decoration: BoxDecoration(
         color: _c.bgCard,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: color.withValues(alpha: 0.2),
-          width: 1.2,
-        ),
+        border: Border.all(color: color.withValues(alpha: 0.2), width: 1.2),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
@@ -838,6 +855,27 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
                       ),
                     ),
                   ),
+                  if (c.isSample || c.isVisual)
+                    OutlinedButton(
+                      onPressed: () =>
+                          _changeProcedure(c, c.isSample ? 'Visual' : 'Sample'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: color,
+                        side: BorderSide(color: color.withValues(alpha: 0.7)),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 5,
+                        ),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        textStyle: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      child: Text('Change to ${c.isSample ? 'V' : 'S'}'),
+                    ),
+                  const SizedBox(width: 2),
                   IconButton(
                     tooltip: 'Edit checkpoint',
                     icon: Icon(
@@ -856,10 +894,22 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
               padding: const EdgeInsets.all(14),
               child: Column(
                 children: [
-                  _detailRow(Icons.location_on_outlined, 'Location', c.location),
-                  _detailRow(Icons.settings_outlined, 'Equipment', c.equipmentName),
+                  _detailRow(
+                    Icons.location_on_outlined,
+                    'Location',
+                    c.location,
+                  ),
+                  _detailRow(
+                    Icons.settings_outlined,
+                    'Equipment',
+                    c.equipmentName,
+                  ),
                   _detailRow(Icons.category_outlined, 'Component', c.component),
-                  _detailRow(Icons.warning_amber_rounded, 'Hazmat', c.hazardousMaterial),
+                  _detailRow(
+                    Icons.warning_amber_rounded,
+                    'Hazmat',
+                    c.hazardousMaterial,
+                  ),
                   const SizedBox(height: 4),
                   _buildSurveyAttribution(c),
                 ],
@@ -966,10 +1016,6 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
                 icon: Icon(Icons.keyboard_arrow_down_rounded, color: color),
                 items: const [
                   DropdownMenuItem(value: 'Pending', child: Text('Pending')),
-                  DropdownMenuItem(
-                    value: 'InProgress',
-                    child: Text('In Progress'),
-                  ),
                   DropdownMenuItem(value: 'Done', child: Text('Done')),
                 ],
                 onChanged: (value) {
@@ -992,7 +1038,7 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
     )) {
       case '2':
       case 'inprogress':
-        return 'InProgress';
+        return 'Pending';
       case '3':
       case 'done':
       case 'completed':

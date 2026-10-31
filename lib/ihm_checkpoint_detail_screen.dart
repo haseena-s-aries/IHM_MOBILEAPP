@@ -168,7 +168,7 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
     switch (value.trim().toLowerCase().replaceAll(RegExp(r'[\s_-]'), '')) {
       case 'inprogress':
       case '2':
-        return 'InProgress';
+        return 'Pending';
       case 'done':
       case '3':
         return 'Done';

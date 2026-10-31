@@ -58,7 +58,8 @@ class SurveyJobListScreen extends StatefulWidget {
   State<SurveyJobListScreen> createState() => _SurveyJobListScreenState();
 }
 
-class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
+class _SurveyJobListScreenState extends State<SurveyJobListScreen>
+    with WidgetsBindingObserver {
   bool isLoading = true;
   bool _isRefreshingJobs = false;
   bool isAdmin = false;
@@ -75,16 +76,26 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
   AppThemeColors get _theme => context.read<ThemeNotifier>().colors;
   bool get _isDarkTheme => context.read<ThemeNotifier>().isDarkMode;
   bool get _isAllSurveyTypes => widget.surveyType == 'All Surveys';
-  String get _screenTitle => widget.titleOverride ?? '${widget.surveyType} Jobs';
+  String get _screenTitle =>
+      widget.titleOverride ?? '${widget.surveyType} Jobs';
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadJobs();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      _loadJobs(showLoading: false);
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
     super.dispose();
   }
@@ -96,14 +107,14 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
     final statusFiltered = normalizedStatuses.isEmpty
         ? jobs
         : jobs
-            .where(
-              (job) =>
-                  normalizedStatuses.contains(
-                    job.displayStatus.toLowerCase(),
-                  ) ||
-                  normalizedStatuses.contains(job.status.toLowerCase()),
-            )
-            .toList();
+              .where(
+                (job) =>
+                    normalizedStatuses.contains(
+                      job.displayStatus.toLowerCase(),
+                    ) ||
+                    normalizedStatuses.contains(job.status.toLowerCase()),
+              )
+              .toList();
 
     if (_searchQuery.isEmpty) return statusFiltered;
     final q = _searchQuery.toLowerCase();
@@ -149,8 +160,7 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
       _showMessage('Job ID missing. Please create/save the job first.');
       return;
     }
-    final hadChecklist =
-        (job.vscpChecklistFilePath ?? '').trim().isNotEmpty;
+    final hadChecklist = (job.vscpChecklistFilePath ?? '').trim().isNotEmpty;
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['xlsx', 'xls'],
@@ -185,10 +195,11 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
       final bytes = await ApiService.downloadVscpChecklist(job.id);
       final dir = await getTemporaryDirectory();
       final fallbackName = 'vscp-checklist-${job.id}.xlsx';
-      final fileName = ((job.vscpChecklistFileName ?? '').trim().isEmpty
-              ? fallbackName
-              : job.vscpChecklistFileName!.trim())
-          .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      final fileName =
+          ((job.vscpChecklistFileName ?? '').trim().isEmpty
+                  ? fallbackName
+                  : job.vscpChecklistFileName!.trim())
+              .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
       final file = File('${dir.path}/$fileName');
 
       await file.writeAsBytes(bytes, flush: true);
@@ -394,69 +405,66 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
     return '$day-$month-${date.year}';
   }
 
- Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
-  if (!_canEditSurveyDate(job)) {
-    _showMessage(
-      'You are not allowed to edit the survey date for this job.',
+  Future<void> _pickAndSaveSurveyDate(SurveyJob job) async {
+    if (!_canEditSurveyDate(job)) {
+      _showMessage('You are not allowed to edit the survey date for this job.');
+      return;
+    }
+
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: job.surveyDate ?? DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
     );
-    return;
-  }
 
-  final picked = await showDatePicker(
-    context: context,
-    initialDate: job.surveyDate ?? DateTime.now(),
-    firstDate: DateTime(2000),
-    lastDate: DateTime(2100),
-  );
+    if (picked == null) return;
 
-  if (picked == null) return;
-
-  // Create the updated object before the API/offline operation.
-  final updatedJob = SurveyJob.fromJson({
-    ...job.toJson(),
-    'surveyDate': picked.toIso8601String(),
-    'displayStatus':
-        job.totalItems > 0 && job.completedItems >= job.totalItems
-            ? 'Completed'
-            : job.completedItems > 0
-                ? 'Pending'
-                : 'In Progress',
-  });
-
-  // Immediately reflect the selected date in the UI.
-  if (mounted) {
-    setState(() {
-      jobs = jobs
-          .map((item) => item.id == job.id ? updatedJob : item)
-          .toList();
+    // Create the updated object before the API/offline operation.
+    final updatedJob = SurveyJob.fromJson({
+      ...job.toJson(),
+      'surveyDate': picked.toIso8601String(),
+      'displayStatus':
+          job.totalItems > 0 && job.completedItems >= job.totalItems
+          ? 'Completed'
+          : job.completedItems > 0
+          ? 'Pending'
+          : 'In Progress',
     });
-  }
 
-  try {
-    await SurveyJobOfflineService.updateSurveyDate(
-      job: updatedJob,
-      surveyDate: picked,
-    );
-
-    if (!mounted) return;
-
-    _showMessage('Survey date saved successfully.');
-
-    // Do not call _loadJobs() here.
-    // It can reload an older cached/API value and overwrite the UI.
-  } catch (e) {
-    // Restore the previous job when saving fails.
+    // Immediately reflect the selected date in the UI.
     if (mounted) {
       setState(() {
         jobs = jobs
-            .map((item) => item.id == job.id ? job : item)
+            .map((item) => item.id == job.id ? updatedJob : item)
             .toList();
       });
     }
 
-    _showMessage(e.toString());
+    try {
+      await SurveyJobOfflineService.updateSurveyDate(
+        job: updatedJob,
+        surveyDate: picked,
+      );
+
+      if (!mounted) return;
+
+      _showMessage('Survey date saved successfully.');
+
+      // Do not call _loadJobs() here.
+      // It can reload an older cached/API value and overwrite the UI.
+    } catch (e) {
+      // Restore the previous job when saving fails.
+      if (mounted) {
+        setState(() {
+          jobs = jobs.map((item) => item.id == job.id ? job : item).toList();
+        });
+      }
+
+      _showMessage(e.toString());
+    }
   }
-}
+
   bool _canEditSurveyDate(SurveyJob job) {
     if (job.canEdit) return true;
     if (userId <= 0) return false;
@@ -484,7 +492,8 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
       userId = prefs.getInt('userId') ?? 0;
       final role = prefs.getString('userRole') ?? '';
       final normalizedRole = role.toLowerCase();
-      isAdmin = normalizedRole == 'admin' ||
+      isAdmin =
+          normalizedRole == 'admin' ||
           normalizedRole == 'global admin' ||
           normalizedRole == 'globaladmin' ||
           normalizedRole == 'administrator' ||
@@ -1808,255 +1817,256 @@ class _SurveyJobListScreenState extends State<SurveyJobListScreen> {
                         ),
                         child: Column(
                           children: [
-                          DropdownButtonFormField<SurveyorOption?>(
-                            value: assignedManager,
-                            decoration: InputDecoration(
-                              labelText: 'Assign Manager (Optional)',
-                              suffixIcon: IconButton(
-                                tooltip: 'Search managers',
-                                icon: const Icon(Icons.search),
-                                onPressed: () async {
-                                  final value =
-                                      await _showSearchPicker<SurveyorOption>(
-                                        title: 'Search Manager',
-                                        items: managers,
-                                        selected: assignedManager,
-                                        label: (manager) => manager.displayName,
+                            DropdownButtonFormField<SurveyorOption?>(
+                              value: assignedManager,
+                              decoration: InputDecoration(
+                                labelText: 'Assign Manager (Optional)',
+                                suffixIcon: IconButton(
+                                  tooltip: 'Search managers',
+                                  icon: const Icon(Icons.search),
+                                  onPressed: () async {
+                                    final value =
+                                        await _showSearchPicker<SurveyorOption>(
+                                          title: 'Search Manager',
+                                          items: managers,
+                                          selected: assignedManager,
+                                          label: (manager) =>
+                                              manager.displayName,
+                                        );
+                                    if (value != null) {
+                                      setDialogState(
+                                        () => assignedManager = value,
                                       );
-                                  if (value != null) {
-                                    setDialogState(
-                                      () => assignedManager = value,
-                                    );
-                                  }
-                                },
-                              ),
-                              labelStyle: const TextStyle(
-                                fontSize: 13,
-                                color: _AppColors.textSecondary,
-                              ),
-                              filled: true,
-                              fillColor: _AppColors.surface,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(
-                                  color: _AppColors.divider,
+                                    }
+                                  },
                                 ),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(
-                                  color: _AppColors.divider,
+                                labelStyle: const TextStyle(
+                                  fontSize: 13,
+                                  color: _AppColors.textSecondary,
                                 ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(
-                                  color: _AppColors.ocean,
-                                  width: 1.5,
-                                ),
-                              ),
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 14,
-                              ),
-                            ),
-                            items: [
-                              const DropdownMenuItem<SurveyorOption?>(
-                                value: null,
-                                child: Text('No manager assigned'),
-                              ),
-                              ...managers.map((manager) {
-                                return DropdownMenuItem<SurveyorOption?>(
-                                  value: manager,
-                                  child: Text(
-                                    manager.displayName,
-                                    style: const TextStyle(fontSize: 14),
+                                filled: true,
+                                fillColor: _AppColors.surface,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(
+                                    color: _AppColors.divider,
                                   ),
-                                );
-                              }),
-                            ],
-                            onChanged: (value) {
-                              setDialogState(() {
-                                assignedManager = value;
-                              });
-                            },
-                          ),
-
-                          const SizedBox(height: 14),
-
-                          DropdownButtonFormField<SurveyorOption?>(
-                            value: primarySurveyor,
-                            decoration: InputDecoration(
-                              labelText: 'Primary Surveyor',
-                              suffixIcon: IconButton(
-                                tooltip: 'Search surveyors',
-                                icon: const Icon(Icons.search),
-                                onPressed: () async {
-                                  final value =
-                                      await _showSearchPicker<SurveyorOption>(
-                                        title: 'Search Primary Surveyor',
-                                        items: surveyors,
-                                        selected: primarySurveyor,
-                                        label: (surveyor) =>
-                                            surveyor.displayName,
-                                      );
-                                  if (value != null) {
-                                    setDialogState(() {
-                                      primarySurveyor = value;
-                                      if (secondarySurveyor?.id == value.id) {
-                                        secondarySurveyor = null;
-                                      }
-                                    });
-                                  }
-                                },
-                              ),
-                              labelStyle: const TextStyle(
-                                fontSize: 13,
-                                color: _AppColors.textSecondary,
-                              ),
-                              filled: true,
-                              fillColor: _AppColors.surface,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(
-                                  color: _AppColors.divider,
                                 ),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(
-                                  color: _AppColors.divider,
-                                ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(
-                                  color: _AppColors.ocean,
-                                  width: 1.5,
-                                ),
-                              ),
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 14,
-                              ),
-                            ),
-                            items: [
-                              const DropdownMenuItem<SurveyorOption?>(
-                                value: null,
-                                child: Text('Not Assign'),
-                              ),
-                              ...surveyors.map((surveyor) {
-                                return DropdownMenuItem<SurveyorOption?>(
-                                  value: surveyor,
-                                  child: Text(
-                                    surveyor.displayName,
-                                    style: const TextStyle(fontSize: 14),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(
+                                    color: _AppColors.divider,
                                   ),
-                                );
-                              }),
-                            ],
-                            onChanged: (value) {
-                              setDialogState(() {
-                                primarySurveyor = value;
-                                if (secondarySurveyor?.id == value?.id) {
-                                  secondarySurveyor = null;
-                                }
-                              });
-                            },
-                          ),
-
-                          const SizedBox(height: 14),
-
-                          DropdownButtonFormField<SurveyorOption?>(
-                            value: secondarySurveyor,
-                            decoration: InputDecoration(
-                              labelText: 'Secondary Surveyor',
-                              suffixIcon: IconButton(
-                                tooltip: 'Search surveyors',
-                                icon: const Icon(Icons.search),
-                                onPressed: () async {
-                                  final available = surveyors
-                                      .where(
-                                        (item) =>
-                                            primarySurveyor == null ||
-                                            item.id != primarySurveyor!.id,
-                                      )
-                                      .toList();
-                                  final value =
-                                      await _showSearchPicker<SurveyorOption>(
-                                        title: 'Search Secondary Surveyor',
-                                        items: available,
-                                        selected: secondarySurveyor,
-                                        label: (surveyor) =>
-                                            surveyor.displayName,
-                                      );
-                                  if (value != null) {
-                                    setDialogState(
-                                      () => secondarySurveyor = value,
-                                    );
-                                  }
-                                },
-                              ),
-                              labelStyle: const TextStyle(
-                                fontSize: 13,
-                                color: _AppColors.textSecondary,
-                              ),
-                              filled: true,
-                              fillColor: _AppColors.surface,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(
-                                  color: _AppColors.divider,
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(
+                                    color: _AppColors.ocean,
+                                    width: 1.5,
+                                  ),
+                                ),
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 14,
                                 ),
                               ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(
-                                  color: _AppColors.divider,
+                              items: [
+                                const DropdownMenuItem<SurveyorOption?>(
+                                  value: null,
+                                  child: Text('No manager assigned'),
                                 ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(
-                                  color: _AppColors.ocean,
-                                  width: 1.5,
-                                ),
-                              ),
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 14,
-                              ),
+                                ...managers.map((manager) {
+                                  return DropdownMenuItem<SurveyorOption?>(
+                                    value: manager,
+                                    child: Text(
+                                      manager.displayName,
+                                      style: const TextStyle(fontSize: 14),
+                                    ),
+                                  );
+                                }),
+                              ],
+                              onChanged: (value) {
+                                setDialogState(() {
+                                  assignedManager = value;
+                                });
+                              },
                             ),
-                            items: [
-                              const DropdownMenuItem<SurveyorOption?>(
-                                value: null,
-                                child: Text('Not Assign'),
+
+                            const SizedBox(height: 14),
+
+                            DropdownButtonFormField<SurveyorOption?>(
+                              value: primarySurveyor,
+                              decoration: InputDecoration(
+                                labelText: 'Primary Surveyor',
+                                suffixIcon: IconButton(
+                                  tooltip: 'Search surveyors',
+                                  icon: const Icon(Icons.search),
+                                  onPressed: () async {
+                                    final value =
+                                        await _showSearchPicker<SurveyorOption>(
+                                          title: 'Search Primary Surveyor',
+                                          items: surveyors,
+                                          selected: primarySurveyor,
+                                          label: (surveyor) =>
+                                              surveyor.displayName,
+                                        );
+                                    if (value != null) {
+                                      setDialogState(() {
+                                        primarySurveyor = value;
+                                        if (secondarySurveyor?.id == value.id) {
+                                          secondarySurveyor = null;
+                                        }
+                                      });
+                                    }
+                                  },
+                                ),
+                                labelStyle: const TextStyle(
+                                  fontSize: 13,
+                                  color: _AppColors.textSecondary,
+                                ),
+                                filled: true,
+                                fillColor: _AppColors.surface,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(
+                                    color: _AppColors.divider,
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(
+                                    color: _AppColors.divider,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(
+                                    color: _AppColors.ocean,
+                                    width: 1.5,
+                                  ),
+                                ),
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 14,
+                                ),
                               ),
-                              ...surveyors
-                                  .where(
-                                    (x) =>
-                                        primarySurveyor == null ||
-                                        x.id != primarySurveyor!.id,
-                                  )
-                                  .map((surveyor) {
-                                    return DropdownMenuItem<SurveyorOption?>(
-                                      value: surveyor,
-                                      child: Text(
-                                        surveyor.displayName,
-                                        style: const TextStyle(fontSize: 14),
-                                      ),
-                                    );
-                                  }),
-                            ],
-                            onChanged: (value) {
-                              setDialogState(() {
-                                secondarySurveyor = value;
-                              });
-                            },
-                          ),
+                              items: [
+                                const DropdownMenuItem<SurveyorOption?>(
+                                  value: null,
+                                  child: Text('Not Assign'),
+                                ),
+                                ...surveyors.map((surveyor) {
+                                  return DropdownMenuItem<SurveyorOption?>(
+                                    value: surveyor,
+                                    child: Text(
+                                      surveyor.displayName,
+                                      style: const TextStyle(fontSize: 14),
+                                    ),
+                                  );
+                                }),
+                              ],
+                              onChanged: (value) {
+                                setDialogState(() {
+                                  primarySurveyor = value;
+                                  if (secondarySurveyor?.id == value?.id) {
+                                    secondarySurveyor = null;
+                                  }
+                                });
+                              },
+                            ),
+
+                            const SizedBox(height: 14),
+
+                            DropdownButtonFormField<SurveyorOption?>(
+                              value: secondarySurveyor,
+                              decoration: InputDecoration(
+                                labelText: 'Secondary Surveyor',
+                                suffixIcon: IconButton(
+                                  tooltip: 'Search surveyors',
+                                  icon: const Icon(Icons.search),
+                                  onPressed: () async {
+                                    final available = surveyors
+                                        .where(
+                                          (item) =>
+                                              primarySurveyor == null ||
+                                              item.id != primarySurveyor!.id,
+                                        )
+                                        .toList();
+                                    final value =
+                                        await _showSearchPicker<SurveyorOption>(
+                                          title: 'Search Secondary Surveyor',
+                                          items: available,
+                                          selected: secondarySurveyor,
+                                          label: (surveyor) =>
+                                              surveyor.displayName,
+                                        );
+                                    if (value != null) {
+                                      setDialogState(
+                                        () => secondarySurveyor = value,
+                                      );
+                                    }
+                                  },
+                                ),
+                                labelStyle: const TextStyle(
+                                  fontSize: 13,
+                                  color: _AppColors.textSecondary,
+                                ),
+                                filled: true,
+                                fillColor: _AppColors.surface,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(
+                                    color: _AppColors.divider,
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(
+                                    color: _AppColors.divider,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(
+                                    color: _AppColors.ocean,
+                                    width: 1.5,
+                                  ),
+                                ),
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 14,
+                                ),
+                              ),
+                              items: [
+                                const DropdownMenuItem<SurveyorOption?>(
+                                  value: null,
+                                  child: Text('Not Assign'),
+                                ),
+                                ...surveyors
+                                    .where(
+                                      (x) =>
+                                          primarySurveyor == null ||
+                                          x.id != primarySurveyor!.id,
+                                    )
+                                    .map((surveyor) {
+                                      return DropdownMenuItem<SurveyorOption?>(
+                                        value: surveyor,
+                                        child: Text(
+                                          surveyor.displayName,
+                                          style: const TextStyle(fontSize: 14),
+                                        ),
+                                      );
+                                    }),
+                              ],
+                              onChanged: (value) {
+                                setDialogState(() {
+                                  secondarySurveyor = value;
+                                });
+                              },
+                            ),
                           ],
                         ),
                       ),

@@ -26,6 +26,8 @@ class SyncSnapshot {
   final int failedCount;
   final int downloadedJobCount;
   final int uploadedItemCount;
+  final int syncTotalCount;
+  final int syncProcessedCount;
   final DateTime? lastSyncedAt;
   final String? message;
 
@@ -36,6 +38,8 @@ class SyncSnapshot {
     this.failedCount = 0,
     this.downloadedJobCount = 0,
     this.uploadedItemCount = 0,
+    this.syncTotalCount = 0,
+    this.syncProcessedCount = 0,
     this.lastSyncedAt,
     this.message,
   });
@@ -63,6 +67,8 @@ class SyncSnapshot {
     int? failedCount,
     int? downloadedJobCount,
     int? uploadedItemCount,
+    int? syncTotalCount,
+    int? syncProcessedCount,
     DateTime? lastSyncedAt,
     bool clearLastSyncedAt = false,
     String? message,
@@ -74,6 +80,8 @@ class SyncSnapshot {
       failedCount: failedCount ?? this.failedCount,
       downloadedJobCount: downloadedJobCount ?? this.downloadedJobCount,
       uploadedItemCount: uploadedItemCount ?? this.uploadedItemCount,
+      syncTotalCount: syncTotalCount ?? this.syncTotalCount,
+      syncProcessedCount: syncProcessedCount ?? this.syncProcessedCount,
       lastSyncedAt: clearLastSyncedAt
           ? null
           : (lastSyncedAt ?? this.lastSyncedAt),
@@ -250,7 +258,15 @@ class SyncService {
       if (_cancelRequested) throw Exception('Sync cancelled.');
       await syncLoadoutCertificatesToServer();
       if (_cancelRequested) throw Exception('Sync cancelled.');
-      await IhmOfflineService.syncPendingIhmData();
+      await IhmOfflineService.syncPendingIhmData(
+        onProgress: (processed, total) {
+          syncStatus.value = syncStatus.value.copyWith(
+            syncTotalCount: total,
+            syncProcessedCount: processed,
+            message: 'Uploading $processed of $total offline items...',
+          );
+        },
+      );
       if (_cancelRequested) throw Exception('Sync cancelled.');
       await ExSurveyOfflineService.syncPendingExData();
       if (_cancelRequested) throw Exception('Sync cancelled.');
@@ -275,12 +291,14 @@ class SyncService {
         uploadedItemCount: pendingBefore > pendingAfter
             ? pendingBefore - pendingAfter
             : 0,
+        syncTotalCount: pendingBefore,
+        syncProcessedCount: pendingBefore - pendingAfter,
         lastSyncedAt: now,
         message: failedAfter > 0
             ? '$failedAfter item(s) need retry.'
             : (hasDownloadWarning
-                ? _lastDownloadWarning
-                : 'Sync completed successfully.'),
+                  ? _lastDownloadWarning
+                  : 'Sync completed successfully.'),
       );
       syncStatus.value = snapshot;
       return snapshot;

@@ -23,6 +23,20 @@ class SurveyJobOfflineService {
         jobCompletionFilter: jobCompletionFilter,
       );
 
+      // A stale/expired session can occasionally return an empty 200 response
+      // while valid jobs are already cached locally. Do not replace the cache
+      // or the visible job list with that empty response.
+      if (jobs.isEmpty) {
+        final cachedJobs = await getCachedSurveyJobs(
+          surveyType: surveyType,
+          isAdmin: isAdmin,
+          userId: userId,
+          ihmCompletionFilter: ihmCompletionFilter,
+          jobCompletionFilter: jobCompletionFilter,
+        );
+        if (cachedJobs.isNotEmpty) return cachedJobs;
+      }
+
       await cacheSurveyJobs(
         surveyType: surveyType,
         isAdmin: isAdmin,
@@ -204,23 +218,19 @@ class SurveyJobOfflineService {
         where: 'surveyJobId = ? AND entityType = ? AND status IN (0, 2, -1)',
         whereArgs: [job.id, 'surveyDate'],
       );
-      await db.insert(
-        'survey_job_sync_queue',
-        {
+      await db.insert('survey_job_sync_queue', {
+        'surveyJobId': job.id,
+        'entityType': 'surveyDate',
+        'operation': 'update',
+        'payloadJson': jsonEncode({
           'surveyJobId': job.id,
-          'entityType': 'surveyDate',
-          'operation': 'update',
-          'payloadJson': jsonEncode({
-            'surveyJobId': job.id,
-            'surveyDate': surveyDate.toIso8601String(),
-          }),
-          'status': 0,
-          'retryCount': 0,
-          'createdAt': now,
-          'updatedAt': now,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+          'surveyDate': surveyDate.toIso8601String(),
+        }),
+        'status': 0,
+        'retryCount': 0,
+        'createdAt': now,
+        'updatedAt': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     } catch (_) {
       await _updateCachedSurveyJobDateInPrefs(job.id, surveyDate);
       throw apiError ?? Exception('Unable to save survey date offline.');
@@ -313,9 +323,9 @@ class SurveyJobOfflineService {
     final prefs = await SharedPreferences.getInstance();
     final dateValue = surveyDate.toIso8601String();
 
-    for (final key in prefs
-        .getKeys()
-        .where((item) => item.startsWith('survey_jobs_cache_'))) {
+    for (final key in prefs.getKeys().where(
+      (item) => item.startsWith('survey_jobs_cache_'),
+    )) {
       final value = prefs.getString(key);
       if (value == null || value.isEmpty) continue;
 
@@ -336,8 +346,8 @@ class SurveyJobOfflineService {
               int.tryParse(payload['completedItems']?.toString() ?? '') ?? 0;
           final totalItems =
               int.tryParse(payload['totalItems']?.toString() ?? '') ?? 0;
-          payload['displayStatus'] = totalItems > 0 &&
-                  completedItems >= totalItems
+          payload['displayStatus'] =
+              totalItems > 0 && completedItems >= totalItems
               ? 'Completed'
               : (completedItems > 0 ? 'Pending' : 'In Progress');
           changed = true;
@@ -398,16 +408,16 @@ class SurveyJobOfflineService {
     );
     final totalItems = rows.length;
     final completedItems = rows
-        .where(
-          (row) => _isCompletedAuditValue(row['auditStatus']?.toString()),
-        )
+        .where((row) => _isCompletedAuditValue(row['auditStatus']?.toString()))
         .length;
 
     payload['totalItems'] = totalItems;
     payload['completedItems'] = completedItems;
     payload['completionPercentage'] = totalItems == 0
         ? 0
-        : double.parse(((completedItems * 100) / totalItems).toStringAsFixed(2));
+        : double.parse(
+            ((completedItems * 100) / totalItems).toStringAsFixed(2),
+          );
     payload['displayStatus'] = _displayStatus(
       surveyDate: payload['surveyDate']?.toString(),
       totalItems: totalItems,
@@ -435,12 +445,7 @@ class SurveyJobOfflineService {
         .replaceAll(' ', '')
         .replaceAll('_', '')
         .replaceAll('-', '');
-    return {
-      'done',
-      '3',
-      'audited',
-      'completed',
-    }.contains(normalized);
+    return {'done', '3', 'audited', 'completed'}.contains(normalized);
   }
 
   static Future<void> _refreshCachedIhmStatusInPrefs(
@@ -448,7 +453,9 @@ class SurveyJobOfflineService {
     Database db,
   ) async {
     final prefs = await SharedPreferences.getInstance();
-    for (final key in prefs.getKeys().where((x) => x.startsWith('survey_jobs_cache_'))) {
+    for (final key in prefs.getKeys().where(
+      (x) => x.startsWith('survey_jobs_cache_'),
+    )) {
       final value = prefs.getString(key);
       if (value == null || value.isEmpty) continue;
       final decoded = jsonDecode(value);
