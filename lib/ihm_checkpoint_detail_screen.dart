@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image/image.dart' as img;
@@ -737,6 +738,16 @@ class _AreaTabState extends State<_AreaTab> {
       fit: fit,
       filterQuality: FilterQuality.medium,
       isAntiAlias: true,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
+        return Container(
+          width: width,
+          height: height,
+          color: _c.bgCardAlt,
+          alignment: Alignment.center,
+          child: const CircularProgressIndicator(strokeWidth: 2),
+        );
+      },
       errorBuilder: (_, __, ___) =>
           _offlineImagePlaceholder(width: width, height: height),
     );
@@ -854,8 +865,40 @@ class _AreaTabState extends State<_AreaTab> {
     final areaId = widget.checkpoint.ihmAreaId;
 
     List<IhmLayoutImage> layouts = [];
+    List<IhmMarker> cachedMarkers = [];
     String? loadError;
     final online = await IhmOfflineService.isOnline;
+
+    // Render the local cache first. This prevents a white screen while the
+    // online refresh/download is in progress and makes cached layouts usable
+    // immediately after the device goes offline.
+    if (!kIsWeb) {
+      try {
+        layouts = await IhmOfflineService.getLocalLayouts(jobId, areaId);
+        cachedMarkers = (await IhmOfflineService.getLocalMarkers(jobId))
+            .where((m) => m.ihmAreaId == areaId)
+            .toList();
+        if (mounted && seq == _loadSeq && (layouts.isNotEmpty || cachedMarkers.isNotEmpty)) {
+          final cachedPath = layouts.isNotEmpty
+              ? layouts.first.filePath
+              : cachedMarkers.first.imagePath;
+          setState(() {
+            layoutImages = layouts;
+            imagePath = cachedPath;
+            markers = _dedupeMarkers(cachedMarkers);
+            _online = online;
+            loading = false;
+          });
+          if (!cachedPath.toLowerCase().endsWith('.pdf')) {
+            _loadLayoutImageSize(cachedPath);
+          }
+        }
+      } catch (_) {
+        // The remote request below remains the source of truth when cache is
+        // unavailable.
+      }
+    }
+
     try {
       layouts = await IhmOfflineService.getLayouts(jobId, areaId);
     } catch (e) {

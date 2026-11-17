@@ -314,14 +314,16 @@ class IhmLayoutImage {
 
   factory IhmLayoutImage.fromJson(Map<String, dynamic> json) => IhmLayoutImage(
     id: int.tryParse(json['id'].toString()) ?? 0,
-    ihmAreaId: json['ihmAreaId'] == null
+    ihmAreaId: (json['ihmAreaId'] ?? json['areaId'] ?? json['IhmAreaId']) == null
         ? null
-        : int.tryParse(json['ihmAreaId'].toString()),
-    filePath: json['filePath']?.toString() ?? '',
+        : int.tryParse((json['ihmAreaId'] ?? json['areaId'] ?? json['IhmAreaId']).toString()),
+    filePath: (json['filePath'] ?? json['path'] ?? json['FilePath'])?.toString() ?? '',
     localFilePath: json['localFilePath']?.toString(),
-    originalFileName: json['originalFileName']?.toString() ?? 'Layout',
+    originalFileName: (json['originalFileName'] ?? json['fileName'] ?? json['OriginalFileName'])?.toString() ?? 'Layout',
     contentType: json['contentType']?.toString(),
-    isCommon: json['isCommon'] == true,
+    isCommon: json['isCommon'] == true ||
+        json['isCommon']?.toString().toLowerCase() == 'true' ||
+        json['isCommon']?.toString() == '1',
   );
 }
 

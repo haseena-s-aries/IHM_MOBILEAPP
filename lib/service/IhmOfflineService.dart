@@ -293,6 +293,13 @@ class IhmOfflineService {
   static Future<IhmCheckpoint> saveFullCheckpoint(
     IhmCheckpoint checkpoint,
   ) async {
+    // Offline-created/imported checkpoints can start as just S or V. Assign a
+    // number only when the surveyor marks the checkpoint Done; existing
+    // numbered values are never rewritten.
+    if (!kIsWeb && _isDoneStatus(checkpoint.auditStatus)) {
+      checkpoint = await _numberIfNeeded(checkpoint);
+    }
+
     if (kIsWeb) {
       return ApiService.updateIhmCheckpointDetails(checkpoint: checkpoint);
     }
@@ -356,11 +363,19 @@ class IhmOfflineService {
 
     final db = await DatabaseHelper.instance.database;
     final isVisual = procedureType.toLowerCase() == 'visual';
+    final currentCode = checkpoint.sampleNo.trim();
+    final procedureCode = isVisual ? 'V' : 'S';
+    final updatedCode = RegExp(r'^[SV](\d+)$', caseSensitive: false).hasMatch(currentCode)
+        ? '$procedureCode${currentCode.substring(1)}'
+        : (currentCode.toUpperCase() == 'S' || currentCode.toUpperCase() == 'V'
+            ? procedureCode
+            : currentCode);
 
     await _upsertCheckpointBase(db, checkpoint);
     await db.update(
       'ihm_checkpoints',
       {
+        'sampleNo': updatedCode,
         'visualCheck': isVisual ? 'V' : '-',
         'samplingCheck': isVisual ? '-' : 'S',
         'synced': 0,
@@ -378,7 +393,42 @@ class IhmOfflineService {
     );
 
     await syncPendingIhmData();
-    return _getLocalCheckpoint(checkpoint.id);
+    final saved = await _getLocalCheckpoint(checkpoint.id);
+    // Return the changed procedure fields as well as the locally persisted
+    // record so the card immediately changes from S↔V while offline.
+    return saved.copyWith(
+      sampleNo: updatedCode,
+      samplingCheck: isVisual ? '-' : 'S',
+      visualCheck: isVisual ? 'V' : '-',
+    );
+  }
+
+  static bool _isDoneStatus(String value) {
+    final normalized = value.trim().toLowerCase().replaceAll(RegExp(r'[\s_-]'), '');
+    return normalized == 'done' || normalized == 'completed' || normalized == '3';
+  }
+
+  static Future<IhmCheckpoint> _numberIfNeeded(IhmCheckpoint checkpoint) async {
+    final code = checkpoint.sampleNo.trim().toUpperCase();
+    if (code != 'S' && code != 'V') return checkpoint;
+
+    final db = await DatabaseHelper.instance.database;
+    final rows = await db.query(
+      'ihm_checkpoints',
+      columns: ['sampleNo'],
+      where: 'surveyJobId = ?',
+      whereArgs: [checkpoint.surveyJobId],
+    );
+    var maxNumber = 0;
+    final prefix = code;
+    for (final row in rows) {
+      final value = row['sampleNo']?.toString().trim().toUpperCase() ?? '';
+      if (!value.startsWith(prefix) || value.length <= prefix.length) continue;
+      final number = int.tryParse(value.substring(prefix.length)) ?? 0;
+      if (number > maxNumber) maxNumber = number;
+    }
+
+    return checkpoint.copyWith(sampleNo: '$prefix${(maxNumber + 1).toString().padLeft(2, '0')}');
   }
 
   static Future<List<IhmMarker>> getMarkers(int jobId, int areaId) async {
