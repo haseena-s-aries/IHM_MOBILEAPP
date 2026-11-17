@@ -14,7 +14,6 @@ import 'package:http/http.dart' as http;
 import 'package:sqflite/sqflite.dart';
 
 class IhmOfflineService {
-  static bool _syncing = false;
 
   // Reused for file downloads so connections (TLS handshakes) are kept alive
   // instead of opening a new connection for every image.
@@ -896,7 +895,6 @@ class IhmOfflineService {
   static Future<void> _runPendingIhmSync({
     void Function(int processed, int total)? onProgress,
   }) async {
-    _syncing = true;
     final db = await DatabaseHelper.instance.database;
 
     try {
@@ -939,7 +937,7 @@ class IhmOfflineService {
         );
       }
     } finally {
-      _syncing = false;
+      // Run bookkeeping is handled by syncPendingIhmData.
     }
   }
 
@@ -1541,10 +1539,14 @@ class IhmOfflineService {
         label: 'Checkpoint ${checkpoint.sampleNo} photo ${photo.id}',
       );
       final editedPath = photo.appendixThreeEditedFilePath;
-      final existingEditedFilePath = existing?['appendixThreeEditedFilePath']
-          ?.toString();
+      final String? existingEditedFilePath = existing == null
+          ? null
+          : existing['appendixThreeEditedFilePath']?.toString();
+      final String? existingEditedLocalPathRaw = existing == null
+          ? null
+          : existing['appendixThreeEditedLocalFilePath']?.toString();
       final existingEditedLocalPath = existingEditedFilePath == editedPath
-          ? existing?['appendixThreeEditedLocalFilePath']?.toString()
+          ? existingEditedLocalPathRaw
           : null;
       final editedLocalPath = editedPath != null && editedPath.trim().isNotEmpty
           ? await _ensureCachedRemoteFile(
