@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:Auras/ThemeNotifier.dart';
 import 'package:Auras/Db/database_factory_initializer.dart';
 import 'package:Auras/network/http_override_initilalizer.dart';
@@ -7,6 +9,7 @@ import 'package:Auras/screen/screen/dashboard_screen.dart';
 import 'package:Auras/screen/screen/landing_screen.dart';
 import 'package:Auras/screen/screen/login_screen.dart';
 import 'package:Auras/screen/screen/register_screen.dart';
+import 'package:Auras/service/auth_session.dart';
 import 'package:Auras/service/sync_service.dart';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -79,6 +82,9 @@ void main() async {
   Widget initialScreen;
 
   if (isLoggedIn && token.isNotEmpty && userRole != null && userId != null) {
+    // Renew an expired token in the background (no-op when offline) so the
+    // dashboard and job list load right away after reopening the app.
+    unawaited(AuthSession.ensureFreshSession());
     final normalizedRole = userRole.toLowerCase();
     final isGlobalAdminRole = normalizedRole == 'admin' ||
         normalizedRole == 'global admin' ||
@@ -136,6 +142,7 @@ class MyApp extends StatelessWidget {
               scaffoldBackgroundColor: const Color(0xFF0D1B2A),
               useMaterial3: true,
             ),
+            navigatorKey: appNavigatorKey,
             home: startScreen,
             routes: {
               '/login': (context) => const LoginScreen(),

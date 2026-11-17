@@ -29,7 +29,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 11,
+      version: 12,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -221,6 +221,12 @@ class DatabaseHelper {
         columnName: 'appendixThreeEditedLocalFilePath',
         definition: 'TEXT',
       );
+    }
+
+    if (oldVersion < 12) {
+      // Area -> layout mapping so shared layouts (machinery / GA) resolve
+      // correctly per area while offline.
+      await _createIhmOfflineTables(db);
     }
   }
 
@@ -445,6 +451,20 @@ class DatabaseHelper {
         isCommon INTEGER DEFAULT 0,
         synced INTEGER DEFAULT 1,
         updatedAt TEXT
+      )
+    ''');
+
+    // One layout file can apply to many areas (a machinery layout assigned to
+    // several areas, or the common GA layout). ihm_layout_images is keyed by
+    // the server layout id, so the per-area assignment is stored here.
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ihm_area_layouts (
+        surveyJobId INTEGER NOT NULL,
+        ihmAreaId INTEGER NOT NULL,
+        layoutId INTEGER NOT NULL,
+        sortOrder INTEGER DEFAULT 0,
+        updatedAt TEXT,
+        PRIMARY KEY (surveyJobId, ihmAreaId, layoutId)
       )
     ''');
 

@@ -1,4 +1,5 @@
-﻿import 'dart:convert';
+﻿import 'package:Auras/service/auth_session.dart';
+import 'dart:convert';
 import 'package:Auras/Db/database_helper.dart';
 import 'package:Auras/app_config.dart';
 import 'package:Auras/ihm_area.dart';
@@ -1753,8 +1754,9 @@ static Future<List<Map<String, dynamic>>> fetchReportRemarks() async {
   // }
 
   static Future<Map<String, String>> _authHeaders({bool json = false}) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('token') ?? '';
+    // Renews the 1-hour JWT when it is expired/near expiry so a user who stays
+    // signed in across app restarts keeps getting their data.
+    final token = await AuthSession.validToken();
 
     return {
       if (json) 'Content-Type': 'application/json',

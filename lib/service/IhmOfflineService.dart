@@ -148,6 +148,11 @@ class IhmOfflineService {
         where: 'surveyJobId = ? AND isCommon = 0',
         whereArgs: [jobId],
       );
+      await txn.delete(
+        'ihm_area_layouts',
+        where: 'surveyJobId = ?',
+        whereArgs: [jobId],
+      );
     } else {
       await txn.delete(
         'ihm_areas',
@@ -158,6 +163,11 @@ class IhmOfflineService {
         'ihm_layout_images',
         where:
             'surveyJobId = ? AND isCommon = 0 AND ihmAreaId IS NOT NULL AND ihmAreaId NOT IN ($areaPlaceholders)',
+        whereArgs: [jobId, ...latestAreaIds],
+      );
+      await txn.delete(
+        'ihm_area_layouts',
+        where: 'surveyJobId = ? AND ihmAreaId NOT IN ($areaPlaceholders)',
         whereArgs: [jobId, ...latestAreaIds],
       );
       await txn.delete(
@@ -470,14 +480,42 @@ class IhmOfflineService {
     int areaId,
   ) async {
     final db = await DatabaseHelper.instance.database;
-    final rows = await db.query(
-      'ihm_layout_images',
-      where: 'surveyJobId = ? AND (ihmAreaId = ? OR isCommon = 1)',
-      whereArgs: [jobId, areaId],
-      orderBy: 'isCommon DESC, id ASC',
-    );
 
-    return rows.map(_layoutFromLocal).toList();
+    // Preferred: the exact per-area assignment captured from the server's
+    // /areas/{areaId}/layouts response (handles machinery layouts that have
+    // no ihmAreaId and are not flagged as common).
+    final mappedRows = await db.rawQuery(
+      '''
+      SELECT l.* FROM ihm_area_layouts m
+      INNER JOIN ihm_layout_images l ON l.id = m.layoutId
+      WHERE m.surveyJobId = ? AND m.ihmAreaId = ?
+      ORDER BY m.sortOrder ASC, l.id ASC
+      ''',
+      [jobId, areaId],
+    );
+    if (mappedRows.isNotEmpty) {
+      return mappedRows.map(_layoutFromLocal).toList();
+    }
+
+    // Legacy cache (synced before the mapping table existed): mirror the
+    // server priority - the area's own layout first, then the common layout.
+    final areaRows = await db.query(
+      'ihm_layout_images',
+      where: 'surveyJobId = ? AND ihmAreaId = ?',
+      whereArgs: [jobId, areaId],
+      orderBy: 'id DESC',
+    );
+    if (areaRows.isNotEmpty) {
+      return areaRows.map(_layoutFromLocal).toList();
+    }
+
+    final commonRows = await db.query(
+      'ihm_layout_images',
+      where: 'surveyJobId = ? AND isCommon = 1',
+      whereArgs: [jobId],
+      orderBy: 'id DESC',
+    );
+    return commonRows.map(_layoutFromLocal).toList();
   }
 
   static Future<List<IhmMarker>> getLocalMarkers(int jobId) async {
@@ -928,7 +966,7 @@ class IhmOfflineService {
       }
     }();
 
-    final layoutTasks = areas.map((area) async {
+    final layoutTasks = areas.map<Future<void> Function()>((area) => () async {
       try {
         final layouts = await ApiService.fetchIhmLayouts(
           jobId: job.id,
@@ -940,9 +978,9 @@ class IhmOfflineService {
       }
     }).toList();
 
-    final photoTasks = areas.expand((area) => area.checkpoints).map((
-      checkpoint,
-    ) async {
+    final photoTasks = areas
+        .expand((area) => area.checkpoints)
+        .map<Future<void> Function()>((checkpoint) => () async {
       try {
         final photos = await ApiService.fetchCheckpointPhotos(checkpoint.id);
         await _cachePhotos(checkpoint, photos, failures: failures);
@@ -1054,6 +1092,7 @@ class IhmOfflineService {
       'ihm_markers',
       'ihm_sampling_photos',
       'ihm_layout_images',
+      'ihm_area_layouts',
       'ihm_sync_queue',
       'ihm_cached_files',
       'sync_metadata',
@@ -1289,6 +1328,11 @@ class IhmOfflineService {
     }
   }
 
+  // Shared layouts (machinery / GA) are returned for many areas of the same
+  // job. Areas are cached in parallel, so dedupe concurrent downloads of the
+  // same layout id to avoid writing the same file several times.
+  static final Map<int, Future<String?>> _layoutDownloadsInFlight = {};
+
   static Future<void> _cacheLayouts(
     int jobId,
     int areaId,
@@ -1296,68 +1340,107 @@ class IhmOfflineService {
     List<String>? failures,
   }) async {
     final db = await DatabaseHelper.instance.database;
-    final layoutIds = layouts.map((layout) => layout.id).toSet();
-    if (layoutIds.isEmpty) {
-      await db.delete(
-        'ihm_layout_images',
-        where: 'surveyJobId = ? AND ihmAreaId = ? AND isCommon = 0',
-        whereArgs: [jobId, areaId],
-      );
-    } else {
-      final areaLayoutIds = layouts
-          .where((layout) => !layout.isCommon)
-          .map((layout) => layout.id)
-          .toSet();
-      final placeholders = areaLayoutIds.map((_) => '?').join(',');
-      await db.delete(
-        'ihm_layout_images',
-        where: areaLayoutIds.isEmpty
-            ? 'surveyJobId = ? AND ihmAreaId = ? AND isCommon = 0'
-            : 'surveyJobId = ? AND ihmAreaId = ? AND isCommon = 0 AND id NOT IN ($placeholders)',
-        whereArgs: [jobId, areaId, ...areaLayoutIds],
-      );
-    }
+
+    // Remove this area's own (non-shared) layouts that the server no longer
+    // returns.
+    final areaLayoutIds = layouts
+        .where((layout) => !layout.isCommon && layout.ihmAreaId == areaId)
+        .map((layout) => layout.id)
+        .toSet();
+    final placeholders = areaLayoutIds.map((_) => '?').join(',');
+    await db.delete(
+      'ihm_layout_images',
+      where: areaLayoutIds.isEmpty
+          ? 'surveyJobId = ? AND ihmAreaId = ? AND isCommon = 0'
+          : 'surveyJobId = ? AND ihmAreaId = ? AND isCommon = 0 AND id NOT IN ($placeholders)',
+      whereArgs: [jobId, areaId, ...areaLayoutIds],
+    );
 
     for (final layout in layouts) {
-      final existing = await db.query(
-        'ihm_layout_images',
-        columns: ['filePath', 'localFilePath'],
-        where: 'id = ?',
-        whereArgs: [layout.id],
-        limit: 1,
-      );
-      final existingFilePath = existing.isEmpty
-          ? null
-          : existing.first['filePath']?.toString();
-      final existingLocalPath =
-          existingFilePath == layout.filePath && existing.isNotEmpty
-          ? existing.first['localFilePath']?.toString()
-          : null;
-      final localPath = await _ensureCachedRemoteFile(
-        remotePath: layout.filePath,
-        existingLocalPath: existingLocalPath,
-        fallbackFileName: layout.originalFileName.isEmpty
-            ? 'layout_${layout.id}.jpg'
-            : layout.originalFileName,
-        folderName: 'ihm_layout_images',
-        requiredForOffline: true,
-        failures: failures,
-        label: layout.isCommon ? 'Common layout' : 'Area $areaId layout',
-      );
-
-      await db.insert('ihm_layout_images', {
-        'id': layout.id,
-        'surveyJobId': jobId,
-        'ihmAreaId': layout.ihmAreaId,
-        'filePath': layout.filePath,
-        'localFilePath': localPath,
-        'originalFileName': layout.originalFileName,
-        'contentType': layout.contentType,
-        'isCommon': layout.isCommon ? 1 : 0,
-        'synced': 1,
-        'updatedAt': DateTime.now().toIso8601String(),
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      final pending = _layoutDownloadsInFlight[layout.id];
+      final download =
+          pending ??
+          _downloadLayout(jobId, areaId, layout, failures: failures);
+      if (pending == null) {
+        _layoutDownloadsInFlight[layout.id] = download;
+      }
+      try {
+        await download;
+      } finally {
+        if (pending == null) {
+          _layoutDownloadsInFlight.remove(layout.id);
+        }
+      }
     }
+
+    // Record exactly which layouts apply to this area, in server order, so the
+    // offline lookup returns the same layout the online API would.
+    final now = DateTime.now().toIso8601String();
+    await db.transaction((txn) async {
+      await txn.delete(
+        'ihm_area_layouts',
+        where: 'surveyJobId = ? AND ihmAreaId = ?',
+        whereArgs: [jobId, areaId],
+      );
+      for (var i = 0; i < layouts.length; i++) {
+        await txn.insert('ihm_area_layouts', {
+          'surveyJobId': jobId,
+          'ihmAreaId': areaId,
+          'layoutId': layouts[i].id,
+          'sortOrder': i,
+          'updatedAt': now,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
+  }
+
+  static Future<String?> _downloadLayout(
+    int jobId,
+    int areaId,
+    IhmLayoutImage layout, {
+    List<String>? failures,
+  }) async {
+    final db = await DatabaseHelper.instance.database;
+    final existing = await db.query(
+      'ihm_layout_images',
+      columns: ['filePath', 'localFilePath'],
+      where: 'id = ?',
+      whereArgs: [layout.id],
+      limit: 1,
+    );
+    final existingFilePath = existing.isEmpty
+        ? null
+        : existing.first['filePath']?.toString();
+    final existingLocalPath =
+        existingFilePath == layout.filePath && existing.isNotEmpty
+        ? existing.first['localFilePath']?.toString()
+        : null;
+    final localPath = await _ensureCachedRemoteFile(
+      remotePath: layout.filePath,
+      existingLocalPath: existingLocalPath,
+      fallbackFileName: layout.originalFileName.isEmpty
+          ? 'layout_${layout.id}.jpg'
+          : layout.originalFileName,
+      folderName: 'ihm_layout_images',
+      requiredForOffline: true,
+      failures: failures,
+      label: layout.isCommon ? 'Common layout' : 'Area $areaId layout',
+    );
+
+    await db.insert('ihm_layout_images', {
+      'id': layout.id,
+      'surveyJobId': jobId,
+      'ihmAreaId': layout.ihmAreaId,
+      'filePath': layout.filePath,
+      'localFilePath': localPath,
+      'originalFileName': layout.originalFileName,
+      'contentType': layout.contentType,
+      'isCommon': layout.isCommon ? 1 : 0,
+      'synced': 1,
+      'updatedAt': DateTime.now().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+    return localPath;
   }
 
   static Future<void> _upsertCheckpointBase(
@@ -1611,15 +1694,18 @@ class IhmOfflineService {
     }
   }
 
+  // Tasks are passed as factories so that only [batchSize] downloads are in
+  // flight at once (a list of already-created futures would all start
+  // immediately and defeat the batching).
   static Future<void> _runInBatches(
-    List<Future<void>> tasks,
+    List<Future<void> Function()> tasks,
     int batchSize,
   ) async {
     for (var start = 0; start < tasks.length; start += batchSize) {
       final end = (start + batchSize) > tasks.length
           ? tasks.length
           : start + batchSize;
-      await Future.wait(tasks.sublist(start, end));
+      await Future.wait(tasks.sublist(start, end).map((task) => task()));
     }
   }
 
