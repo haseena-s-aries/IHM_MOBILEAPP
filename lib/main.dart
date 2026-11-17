@@ -10,6 +10,7 @@ import 'package:Auras/screen/screen/landing_screen.dart';
 import 'package:Auras/screen/screen/login_screen.dart';
 import 'package:Auras/screen/screen/register_screen.dart';
 import 'package:Auras/service/auth_session.dart';
+import 'package:Auras/service/camera_recovery.dart';
 import 'package:Auras/service/sync_service.dart';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -106,6 +107,12 @@ void main() async {
   }
 
   runApp(MyApp(startScreen: initialScreen, isDarkMode: isDarkMode));
+
+  // Save any checkpoint photo that was lost because Android closed the app
+  // while the camera was open.
+  if (isLoggedIn && token.isNotEmpty) {
+    unawaited(CameraRecovery.recoverLostPhotos());
+  }
 }
 
 class MyApp extends StatelessWidget {

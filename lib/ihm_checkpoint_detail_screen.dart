@@ -1,3 +1,4 @@
+import 'package:Auras/service/camera_recovery.dart';
 import 'package:Auras/ThemeNotifier.dart';
 import 'package:Auras/ihm_area.dart';
 import 'package:Auras/screen/screen/ihm_conflict_review_screen.dart';
@@ -1589,12 +1590,25 @@ class _ImagesTabState extends State<_ImagesTab> {
           maxHeight: 1800,
         );
       } else {
-        final file = await picker.pickImage(
-          source: source,
-          imageQuality: 75,
-          maxWidth: 1800,
-          maxHeight: 1800,
-        );
+        // Android may close the app while the camera is open (often on the
+        // first camera launch). Remember the checkpoint so the photo can be
+        // recovered and saved after the app restarts.
+        if (source == ImageSource.camera) {
+          await CameraRecovery.rememberCheckpoint(widget.checkpoint);
+        }
+        final XFile? file;
+        try {
+          file = await picker.pickImage(
+            source: source,
+            imageQuality: 75,
+            maxWidth: 1800,
+            maxHeight: 1800,
+          );
+        } finally {
+          if (source == ImageSource.camera) {
+            await CameraRecovery.clear();
+          }
+        }
         files = file == null ? <XFile>[] : <XFile>[file];
       }
 
