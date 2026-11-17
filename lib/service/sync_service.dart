@@ -244,20 +244,17 @@ class SyncService {
     syncStatus.value = await _buildSnapshot(
       state: 'syncing',
       isSyncing: true,
-      message: 'Downloading latest accessible jobs...',
+      message: 'Uploading pending offline changes...',
     );
 
     try {
-      final downloadedJobs = await syncAccessibleSurveyJobsToLocal();
-      if (_cancelRequested) {
-        throw Exception('Sync cancelled.');
-      }
-
+      // Upload offline work FIRST. Before, every job (all areas, photos and
+      // layouts) was downloaded before any offline change was sent, so photos
+      // taken offline waited behind the whole download and were missing from
+      // the server, and from the job data just downloaded, until the end.
       syncStatus.value = syncStatus.value.copyWith(
-        downloadedJobCount: downloadedJobs,
         message: 'Uploading pending offline changes...',
       );
-
       await syncSurveyJobQueueToServer();
       if (_cancelRequested) throw Exception('Sync cancelled.');
       await syncTowageCertificatesToServer();
@@ -267,6 +264,7 @@ class SyncService {
       await syncLoadoutCertificatesToServer();
       if (_cancelRequested) throw Exception('Sync cancelled.');
       await IhmOfflineService.syncPendingIhmData(
+        waitIfRunning: true,
         onProgress: (processed, total) {
           syncStatus.value = syncStatus.value.copyWith(
             syncTotalCount: total,
@@ -278,6 +276,19 @@ class SyncService {
       if (_cancelRequested) throw Exception('Sync cancelled.');
       await ExSurveyOfflineService.syncPendingExData();
       if (_cancelRequested) throw Exception('Sync cancelled.');
+
+      syncStatus.value = syncStatus.value.copyWith(
+        message: 'Downloading latest accessible jobs...',
+      );
+      final downloadedJobs = await syncAccessibleSurveyJobsToLocal();
+      if (_cancelRequested) {
+        throw Exception('Sync cancelled.');
+      }
+
+      syncStatus.value = syncStatus.value.copyWith(
+        downloadedJobCount: downloadedJobs,
+      );
+
       await syncFromServerToLocal();
 
       final pendingAfter = await _pendingOfflineItemCount();

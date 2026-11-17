@@ -17,3 +17,5 @@ Future<Uint8List> readIhmLocalPhoto(String path) {
 }
 
 Future<void> clearIhmLocalFiles() async {}
+
+Future<bool> ihmLocalFileHasContent(String path) async => false;

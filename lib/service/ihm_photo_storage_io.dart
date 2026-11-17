@@ -51,3 +51,9 @@ Future<void> clearIhmLocalFiles() async {
     }
   }
 }
+
+Future<bool> ihmLocalFileHasContent(String path) async {
+  final file = File(path);
+  if (!await file.exists()) return false;
+  return await file.length() > 0;
+}
