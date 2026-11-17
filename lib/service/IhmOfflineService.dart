@@ -676,21 +676,34 @@ class IhmOfflineService {
     }
 
     if (await isOnline) {
+      List<IhmSamplingPhoto> photos;
+      final fetchedAt = DateTime.now();
       try {
-        final photos = await ApiService.fetchCheckpointPhotos(checkpoint.id);
-
-        try {
-          await _cachePhotos(checkpoint, photos);
-        } catch (_) {
-          // Cache failure should not hide server images from mobile UI.
-        }
-
-        return photos;
+        photos = await ApiService.fetchCheckpointPhotos(checkpoint.id);
       } catch (_) {
-        // Offline/fetch failed: fall back to local cache.
+        // Fetch failed: fall back to local cache.
+        return getLocalCheckpointPhotos(checkpoint.id);
+      }
+
+      try {
+        await _cachePhotos(
+          checkpoint,
+          photos,
+          isCompleteList: true,
+          listFetchedAt: fetchedAt,
+        );
+      } catch (_) {
+        // Cache failure must not hide images: show server photos plus any
+        // photos still waiting to upload from this device.
+        final pending = (await getLocalCheckpointPhotos(
+          checkpoint.id,
+        )).where((photo) => photo.id < 0).toList();
+        return [...pending, ...photos];
       }
     }
 
+    // The local table holds both server photos and photos taken offline that
+    // are still waiting to upload, so the full set is always shown.
     return getLocalCheckpointPhotos(checkpoint.id);
   }
 
@@ -702,10 +715,22 @@ class IhmOfflineService {
       'ihm_sampling_photos',
       where: 'ihmCheckpointId = ? AND deleted = 0',
       whereArgs: [checkpointId],
-      orderBy: 'id DESC',
+      // Pending offline photos (negative ids, newest = most negative) first,
+      // then server photos newest first.
+      orderBy: 'CASE WHEN id < 0 THEN 0 ELSE 1 END, '
+          'CASE WHEN id < 0 THEN id ELSE -id END',
     );
 
-    return rows.map(_photoFromLocal).toList();
+    // Older app versions could store the same server photo twice (once under
+    // the local id used while offline and once under the server id).
+    final seenServerIds = <int>{};
+    final photos = <IhmSamplingPhoto>[];
+    for (final row in rows) {
+      final serverId = _int(row['serverId']);
+      if (serverId > 0 && !seenServerIds.add(serverId)) continue;
+      photos.add(_photoFromLocal(row));
+    }
+    return photos;
   }
 
   static Future<IhmSamplingPhoto> saveCheckpointPhoto({
@@ -741,7 +766,12 @@ class IhmOfflineService {
     final localPath = await _writeLocalPhoto(fileBytes, fileName);
     final db = await DatabaseHelper.instance.database;
 
-    final localId = await db.insert('ihm_sampling_photos', {
+    // Negative ids keep offline photos out of the server id range, so caching
+    // server photos can never overwrite a photo that has not uploaded yet.
+    final localId = await _nextLocalPhotoId(db);
+    await db.insert('ihm_sampling_photos', {
+      'id': localId,
+      'serverId': null,
       'surveyJobId': checkpoint.surveyJobId,
       'ihmAreaId': checkpoint.ihmAreaId,
       'ihmCheckpointId': checkpoint.id,
@@ -783,6 +813,34 @@ class IhmOfflineService {
     );
     final serverId = rows.isEmpty ? photo.id : _int(rows.first['serverId']);
 
+    // Photo taken offline and never uploaded: drop the pending upload, there
+    // is nothing to delete on the server.
+    if (rows.isNotEmpty && serverId <= 0) {
+      final pendingUploads = await db.query(
+        'ihm_sync_queue',
+        columns: ['id'],
+        where:
+            "entityType = 'photo' AND operation = 'upload' AND entityLocalId = ? "
+            'AND status IN (0, 2)',
+        whereArgs: [photo.id],
+      );
+      if (pendingUploads.isNotEmpty) {
+        await db.delete(
+          'ihm_sync_queue',
+          where:
+              "entityType = 'photo' AND operation = 'upload' AND entityLocalId = ? "
+              'AND status IN (0, 2)',
+          whereArgs: [photo.id],
+        );
+        await db.delete(
+          'ihm_sampling_photos',
+          where: 'id = ?',
+          whereArgs: [photo.id],
+        );
+        return;
+      }
+    }
+
     await db.update(
       'ihm_sampling_photos',
       {
@@ -804,12 +862,40 @@ class IhmOfflineService {
     await syncPendingIhmData();
   }
 
+  static Future<void>? _pendingSyncRun;
+
+  /// Uploads queued offline changes. When a run is already in progress, screens
+  /// return immediately, while the main sync passes [waitIfRunning] so it does
+  /// not report "done" while photos are still uploading.
   static Future<void> syncPendingIhmData({
     void Function(int processed, int total)? onProgress,
+    bool waitIfRunning = false,
   }) async {
     if (kIsWeb) return;
-    if (_syncing || !(await isOnline)) return;
+    final running = _pendingSyncRun;
+    if (running != null) {
+      if (waitIfRunning) await running;
+      return;
+    }
+    if (!(await isOnline)) return;
+    final startedMeanwhile = _pendingSyncRun;
+    if (startedMeanwhile != null) {
+      if (waitIfRunning) await startedMeanwhile;
+      return;
+    }
 
+    final run = _runPendingIhmSync(onProgress: onProgress);
+    _pendingSyncRun = run;
+    try {
+      await run;
+    } finally {
+      if (identical(_pendingSyncRun, run)) _pendingSyncRun = null;
+    }
+  }
+
+  static Future<void> _runPendingIhmSync({
+    void Function(int processed, int total)? onProgress,
+  }) async {
     _syncing = true;
     final db = await DatabaseHelper.instance.database;
 
@@ -839,7 +925,7 @@ class IhmOfflineService {
         final batch = <Map<String, Object?>>[];
         while (start < queue.length &&
             queue[start]['entityType']?.toString() == 'photo' &&
-            batch.length < 4) {
+            batch.length < 6) {
           batch.add(queue[start]);
           start++;
         }
@@ -981,6 +1067,7 @@ class IhmOfflineService {
     }
 
     Map<int, List<IhmSamplingPhoto>>? bulkPhotos;
+    final photosFetchedAt = DateTime.now();
     try {
       bulkPhotos = await ApiService.fetchJobCheckpointPhotos(job.id);
     } catch (error) {
@@ -1012,8 +1099,13 @@ class IhmOfflineService {
             (bulkPhotos != null
                 ? const <IhmSamplingPhoto>[]
                 : await ApiService.fetchCheckpointPhotos(checkpoint.id));
-        if (photos.isEmpty) return;
-        await _cachePhotos(checkpoint, photos, failures: failures);
+        await _cachePhotos(
+          checkpoint,
+          photos,
+          failures: failures,
+          isCompleteList: true,
+          listFetchedAt: photosFetchedAt,
+        );
       } catch (error) {
         failures.add('Photos ${checkpoint.sampleNo}: $error');
       }
@@ -1215,12 +1307,23 @@ class IhmOfflineService {
     if (entityType == 'photo') {
       final localId = _int(payload['localId']);
       if (operation == 'delete') {
-        final serverId = _int(payload['serverId']);
+        var serverId = _int(payload['serverId']);
+        if (serverId <= 0) {
+          // The photo may have been uploaded after the delete was queued.
+          final current = await db.query(
+            'ihm_sampling_photos',
+            columns: ['serverId'],
+            where: 'id = ?',
+            whereArgs: [localId],
+            limit: 1,
+          );
+          if (current.isNotEmpty) serverId = _int(current.first['serverId']);
+        }
         if (serverId > 0) await ApiService.deleteCheckpointPhoto(serverId);
         await db.delete(
           'ihm_sampling_photos',
-          where: 'id = ?',
-          whereArgs: [localId],
+          where: 'id = ? OR (serverId = ? AND serverId > 0)',
+          whereArgs: [localId, serverId],
         );
         return;
       }
@@ -1243,27 +1346,12 @@ class IhmOfflineService {
         fileName: localPath.split(RegExp(r'[\\/]')).last,
       );
 
-      await db.delete(
-        'ihm_sampling_photos',
-        // Local photo IDs and server photo IDs are different namespaces.
-        // Never delete a local row merely because its local id equals the
-        // server id returned for another upload.
-        where: 'serverId = ? AND id != ?',
-        whereArgs: [uploaded.id, localId],
-      );
-
-      await db.update(
-        'ihm_sampling_photos',
-        uploaded.toLocalMap(
-          surveyJobId: checkpoint.surveyJobId,
-          checkpointId: checkpoint.id,
-          areaId: checkpoint.ihmAreaId,
-          localId: localId,
-          localFilePath: localPath,
-          synced: 1,
-        ),
-        where: 'id = ?',
-        whereArgs: [localId],
+      await _storeUploadedPhoto(
+        db,
+        localId: localId,
+        uploaded: uploaded,
+        checkpoint: checkpoint,
+        localPath: localPath,
       );
       return;
     }
@@ -1287,32 +1375,162 @@ class IhmOfflineService {
     }
   }
 
+  /// Next id for a photo taken offline. Always negative, so it never clashes
+  /// with a server photo id.
+  static Future<int> _nextLocalPhotoId(DatabaseExecutor db) async {
+    final result = await db.rawQuery(
+      'SELECT MIN(id) AS minId FROM ihm_sampling_photos',
+    );
+    final minId = _int(result.first['minId']);
+    return (minId < 0 ? minId : 0) - 1;
+  }
+
+  /// After an offline photo uploads, store it under its server id so later
+  /// downloads update this same row (keeping the local file, no re-download
+  /// and no duplicate).
+  static Future<void> _storeUploadedPhoto(
+    Database db, {
+    required int localId,
+    required IhmSamplingPhoto uploaded,
+    required IhmCheckpoint checkpoint,
+    required String localPath,
+  }) async {
+    await db.transaction((txn) async {
+      final serverId = uploaded.id;
+      var targetId = localId;
+
+      if (serverId > 0) {
+        final clash = await txn.query(
+          'ihm_sampling_photos',
+          columns: ['id', 'serverId', 'synced'],
+          where: 'id = ?',
+          whereArgs: [serverId],
+          limit: 1,
+        );
+        final clashIsCopy =
+            clash.isNotEmpty &&
+            _int(clash.first['serverId']) == serverId &&
+            _int(clash.first['synced']) == 1;
+        if (clash.isEmpty || clashIsCopy) {
+          if (clashIsCopy && serverId != localId) {
+            await txn.delete(
+              'ihm_sampling_photos',
+              where: 'id = ?',
+              whereArgs: [serverId],
+            );
+          }
+          targetId = serverId;
+        }
+        // Remove any other copy of the same server photo.
+        await txn.delete(
+          'ihm_sampling_photos',
+          where: 'serverId = ? AND id != ? AND id != ?',
+          whereArgs: [serverId, localId, targetId],
+        );
+      }
+
+      await txn.update(
+        'ihm_sampling_photos',
+        uploaded.toLocalMap(
+          surveyJobId: checkpoint.surveyJobId,
+          checkpointId: checkpoint.id,
+          areaId: checkpoint.ihmAreaId,
+          localId: targetId,
+          localFilePath: localPath,
+          synced: 1,
+        ),
+        where: 'id = ?',
+        whereArgs: [localId],
+      );
+
+      if (targetId != localId) {
+        // Keep later queue entries (e.g. a delete) pointing at this photo.
+        final queueRows = await txn.query(
+          'ihm_sync_queue',
+          columns: ['id', 'payloadJson'],
+          where: "entityType = 'photo' AND entityLocalId = ? AND status != 1",
+          whereArgs: [localId],
+        );
+        for (final row in queueRows) {
+          Map<String, dynamic> payload;
+          try {
+            payload = Map<String, dynamic>.from(
+              jsonDecode(row['payloadJson']?.toString() ?? '{}') as Map,
+            );
+          } catch (_) {
+            payload = {};
+          }
+          payload['localId'] = targetId;
+          payload['serverId'] = serverId;
+          await txn.update(
+            'ihm_sync_queue',
+            {'entityLocalId': targetId, 'payloadJson': jsonEncode(payload)},
+            where: 'id = ?',
+            whereArgs: [row['id']],
+          );
+        }
+      }
+    });
+  }
+
+  /// Stores server photos locally (downloading files that are not on the
+  /// device yet). Rows are matched by server id, so a photo uploaded from this
+  /// device reuses its local file instead of being downloaded again.
+  ///
+  /// When [isCompleteList] is true, [photos] is the full server list for the
+  /// checkpoint and synced local rows that are no longer on the server are
+  /// removed. Photos still waiting to upload are never touched.
   static Future<void> _cachePhotos(
     IhmCheckpoint checkpoint,
     List<IhmSamplingPhoto> photos, {
     List<String>? failures,
+    bool isCompleteList = false,
+    DateTime? listFetchedAt,
   }) async {
     final db = await DatabaseHelper.instance.database;
-    for (final photo in photos) {
-      final existing = await db.query(
+
+    if (isCompleteList) {
+      final serverIds = photos
+          .map((photo) => photo.id)
+          .where((id) => id > 0)
+          .toList();
+      final placeholders = serverIds.map((_) => '?').join(',');
+      // Rows changed after the list was fetched (e.g. a photo that finished
+      // uploading meanwhile) are kept.
+      final cutoff = (listFetchedAt ?? DateTime.now()).toIso8601String();
+      await db.delete(
         'ihm_sampling_photos',
-        columns: [
-          'filePath',
-          'localFilePath',
-          'appendixThreeEditedFilePath',
-          'appendixThreeEditedLocalFilePath',
-        ],
-        where: 'id = ?',
-        whereArgs: [photo.id],
-        limit: 1,
+        where:
+            'ihmCheckpointId = ? AND synced = 1 AND deleted = 0 AND serverId > 0 '
+            'AND (updatedAt IS NULL OR updatedAt < ?)'
+            '${serverIds.isEmpty ? '' : ' AND serverId NOT IN ($placeholders)'}',
+        whereArgs: [checkpoint.id, cutoff, ...serverIds],
       );
-      final existingFilePath = existing.isEmpty
-          ? null
-          : existing.first['filePath']?.toString();
-      final existingLocalPath =
-          existingFilePath == photo.filePath && existing.isNotEmpty
-          ? existing.first['localFilePath']?.toString()
-          : null;
+    }
+
+    for (final photo in photos) {
+      if (photo.id <= 0) continue;
+
+      final matches = await db.query(
+        'ihm_sampling_photos',
+        where: 'serverId = ?',
+        whereArgs: [photo.id],
+        orderBy: 'CASE WHEN id = ${photo.id} THEN 0 ELSE 1 END',
+      );
+
+      // A pending local delete or edit of this photo wins over the server copy.
+      if (matches.any((row) => _int(row['synced']) == 0)) continue;
+
+      final existing = matches.isEmpty ? null : matches.first;
+      final existingFilePath = existing?['filePath']?.toString();
+      String? existingLocalPath = existing?['localFilePath']?.toString();
+      if (existingFilePath != null &&
+          existingFilePath != photo.filePath &&
+          existingFilePath != existingLocalPath) {
+        // Server file changed: download again.
+        existingLocalPath = null;
+      }
+
       final localPath = await _ensureCachedRemoteFile(
         remotePath: photo.filePath,
         existingLocalPath: existingLocalPath,
@@ -1323,12 +1541,10 @@ class IhmOfflineService {
         label: 'Checkpoint ${checkpoint.sampleNo} photo ${photo.id}',
       );
       final editedPath = photo.appendixThreeEditedFilePath;
-      final existingEditedFilePath = existing.isEmpty
-          ? null
-          : existing.first['appendixThreeEditedFilePath']?.toString();
-      final existingEditedLocalPath =
-          existingEditedFilePath == editedPath && existing.isNotEmpty
-          ? existing.first['appendixThreeEditedLocalFilePath']?.toString()
+      final existingEditedFilePath = existing?['appendixThreeEditedFilePath']
+          ?.toString();
+      final existingEditedLocalPath = existingEditedFilePath == editedPath
+          ? existing?['appendixThreeEditedLocalFilePath']?.toString()
           : null;
       final editedLocalPath = editedPath != null && editedPath.trim().isNotEmpty
           ? await _ensureCachedRemoteFile(
@@ -1343,18 +1559,53 @@ class IhmOfflineService {
             )
           : existingEditedLocalPath;
 
-      await db.insert(
-        'ihm_sampling_photos',
-        photo.toLocalMap(
-          surveyJobId: checkpoint.surveyJobId,
-          checkpointId: checkpoint.id,
-          areaId: checkpoint.ihmAreaId,
-          localId: photo.id,
-          localFilePath: localPath,
-          appendixThreeEditedLocalFilePath: editedLocalPath,
-        ),
-        conflictAlgorithm: ConflictAlgorithm.replace,
+      final rowId = existing == null ? photo.id : _int(existing['id']);
+      final values = photo.toLocalMap(
+        surveyJobId: checkpoint.surveyJobId,
+        checkpointId: checkpoint.id,
+        areaId: checkpoint.ihmAreaId,
+        localId: rowId,
+        localFilePath: localPath,
+        appendixThreeEditedLocalFilePath: editedLocalPath,
       );
+
+      await db.transaction((txn) async {
+        if (existing == null) {
+          final clash = await txn.query(
+            'ihm_sampling_photos',
+            columns: ['id'],
+            where: 'id = ?',
+            whereArgs: [photo.id],
+            limit: 1,
+          );
+          if (clash.isNotEmpty) {
+            // Legacy row using this number as a local id: keep it and store
+            // the server photo under a new local id.
+            values['id'] = await _nextLocalPhotoId(txn);
+          }
+          await txn.insert('ihm_sampling_photos', values);
+        } else {
+          await txn.update(
+            'ihm_sampling_photos',
+            values,
+            where: 'id = ?',
+            whereArgs: [rowId],
+          );
+          // Drop duplicate copies left by older app versions.
+          final extraIds = matches
+              .skip(1)
+              .map((row) => _int(row['id']))
+              .where((id) => id != rowId)
+              .toList();
+          if (extraIds.isNotEmpty) {
+            await txn.delete(
+              'ihm_sampling_photos',
+              where: 'id IN (${extraIds.map((_) => '?').join(',')})',
+              whereArgs: extraIds,
+            );
+          }
+        }
+      });
     }
   }
 
@@ -1739,10 +1990,11 @@ class IhmOfflineService {
     }
   }
 
+  // Only checks that the file exists and is not empty. Reading every cached
+  // image in full on each sync made sync very slow on jobs with many photos.
   static Future<bool> _canReadLocalFile(String path) async {
     try {
-      final bytes = await readIhmLocalPhoto(path);
-      return bytes.isNotEmpty;
+      return await ihmLocalFileHasContent(path);
     } catch (_) {
       return false;
     }

@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:Auras/model/CarogDetails_model.dart';
 import 'package:Auras/model/Recommendation.dart';
 import 'package:Auras/model/loadout.dart';
@@ -29,7 +32,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 12,
+      version: 13,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -227,6 +230,62 @@ class DatabaseHelper {
       // Area -> layout mapping so shared layouts (machinery / GA) resolve
       // correctly per area while offline.
       await _createIhmOfflineTables(db);
+    }
+
+    if (oldVersion < 13) {
+      await _movePendingIhmPhotosToNegativeIds(db);
+    }
+  }
+
+  /// Offline photos used to get positive auto-increment ids, the same id space
+  /// as server photo ids. Caching a server photo with the same id then
+  /// overwrote (lost) the pending offline photo. Pending photos now use
+  /// negative ids; move any existing ones (and their queue entries).
+  Future<void> _movePendingIhmPhotosToNegativeIds(Database db) async {
+    try {
+      await db.transaction((txn) async {
+        final pending = await txn.query(
+          'ihm_sampling_photos',
+          columns: ['id'],
+          where: 'id > 0 AND synced = 0 AND (serverId IS NULL OR serverId = 0)',
+        );
+        for (final row in pending) {
+          final oldId = int.tryParse(row['id']?.toString() ?? '') ?? 0;
+          if (oldId <= 0) continue;
+          final newId = -oldId;
+          await txn.update(
+            'ihm_sampling_photos',
+            {'id': newId},
+            where: 'id = ?',
+            whereArgs: [oldId],
+          );
+          final queueRows = await txn.query(
+            'ihm_sync_queue',
+            columns: ['id', 'payloadJson'],
+            where: "entityType = 'photo' AND entityLocalId = ?",
+            whereArgs: [oldId],
+          );
+          for (final queueRow in queueRows) {
+            Map<String, dynamic> payload;
+            try {
+              payload = Map<String, dynamic>.from(
+                jsonDecode(queueRow['payloadJson']?.toString() ?? '{}') as Map,
+              );
+            } catch (_) {
+              payload = {};
+            }
+            payload['localId'] = newId;
+            await txn.update(
+              'ihm_sync_queue',
+              {'entityLocalId': newId, 'payloadJson': jsonEncode(payload)},
+              where: 'id = ?',
+              whereArgs: [queueRow['id']],
+            );
+          }
+        }
+      });
+    } catch (error) {
+      debugPrint('DB upgrade: moving pending IHM photo ids failed: $error');
     }
   }
 

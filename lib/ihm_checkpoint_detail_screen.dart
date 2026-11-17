@@ -1581,9 +1581,20 @@ class _ImagesTabState extends State<_ImagesTab> {
 
       final List<XFile> files;
       if (source == ImageSource.gallery) {
-        files = await picker.pickMultiImage(imageQuality: 75);
+        // The server keeps photos at max 1800px (JPEG 75), so resizing here
+        // loses nothing and makes offline storage and sync uploads much smaller.
+        files = await picker.pickMultiImage(
+          imageQuality: 75,
+          maxWidth: 1800,
+          maxHeight: 1800,
+        );
       } else {
-        final file = await picker.pickImage(source: source, imageQuality: 75);
+        final file = await picker.pickImage(
+          source: source,
+          imageQuality: 75,
+          maxWidth: 1800,
+          maxHeight: 1800,
+        );
         files = file == null ? <XFile>[] : <XFile>[file];
       }
 
