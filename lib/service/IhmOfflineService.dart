@@ -16,7 +16,11 @@ import 'package:sqflite/sqflite.dart';
 class IhmOfflineService {
   static bool _syncing = false;
 
-  static const int _parallelFetchLimit = 6;
+  // Reused for file downloads so connections (TLS handshakes) are kept alive
+  // instead of opening a new connection for every image.
+  static final http.Client _downloadClient = http.Client();
+
+  static const int _parallelFetchLimit = 10;
 
   static Future<bool> get isOnline async {
     final result = await Connectivity().checkConnectivity();
@@ -966,12 +970,33 @@ class IhmOfflineService {
       }
     }();
 
+    // Prefer the bulk endpoints (one request per job). Older servers return
+    // 404 for them, in which case fall back to one request per area /
+    // checkpoint.
+    Map<int, List<IhmLayoutImage>>? bulkLayouts;
+    try {
+      bulkLayouts = await ApiService.fetchIhmAreaLayouts(job.id);
+    } catch (error) {
+      debugPrint('[IHM sync] bulk layouts failed for job ${job.id}: $error');
+    }
+
+    Map<int, List<IhmSamplingPhoto>>? bulkPhotos;
+    try {
+      bulkPhotos = await ApiService.fetchJobCheckpointPhotos(job.id);
+    } catch (error) {
+      debugPrint('[IHM sync] bulk photos failed for job ${job.id}: $error');
+    }
+
     final layoutTasks = areas.map<Future<void> Function()>((area) => () async {
       try {
-        final layouts = await ApiService.fetchIhmLayouts(
-          jobId: job.id,
-          areaId: area.id,
-        );
+        final layouts =
+            bulkLayouts?[area.id] ??
+            (bulkLayouts != null
+                ? const <IhmLayoutImage>[]
+                : await ApiService.fetchIhmLayouts(
+                    jobId: job.id,
+                    areaId: area.id,
+                  ));
         await _cacheLayouts(job.id, area.id, layouts, failures: failures);
       } catch (error) {
         failures.add('Layout ${area.areaName}: $error');
@@ -982,7 +1007,12 @@ class IhmOfflineService {
         .expand((area) => area.checkpoints)
         .map<Future<void> Function()>((checkpoint) => () async {
       try {
-        final photos = await ApiService.fetchCheckpointPhotos(checkpoint.id);
+        final photos =
+            bulkPhotos?[checkpoint.id] ??
+            (bulkPhotos != null
+                ? const <IhmSamplingPhoto>[]
+                : await ApiService.fetchCheckpointPhotos(checkpoint.id));
+        if (photos.isEmpty) return;
         await _cachePhotos(checkpoint, photos, failures: failures);
       } catch (error) {
         failures.add('Photos ${checkpoint.sampleNo}: $error');
@@ -1654,7 +1684,7 @@ class IhmOfflineService {
         '[IHM offline image] ${label ?? remotePath} downloading. '
         'remote=$remoteUrl existingLocal=$existingLocalPath',
       );
-      final response = await http.get(Uri.parse(remoteUrl));
+      final response = await _downloadClient.get(Uri.parse(remoteUrl));
       if (response.statusCode < 200 ||
           response.statusCode >= 300 ||
           response.bodyBytes.isEmpty) {

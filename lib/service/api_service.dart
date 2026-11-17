@@ -2375,6 +2375,69 @@ static Future<List<Map<String, dynamic>>> fetchReportRemarks() async {
     return data.map((x) => IhmSamplingPhoto.fromJson(x)).toList();
   }
 
+  /// All checkpoint photos of a job in one request, grouped by checkpoint id.
+  /// Returns null when the server does not support the bulk endpoint yet
+  /// (callers then fall back to [fetchCheckpointPhotos] per checkpoint).
+  static Future<Map<int, List<IhmSamplingPhoto>>?> fetchJobCheckpointPhotos(
+    int jobId,
+  ) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/ihm-survey/jobs/$jobId/checkpoint-photos'),
+      headers: await _authHeaders(),
+    );
+
+    if (res.statusCode == 404 || res.statusCode == 405) return null;
+    if (res.statusCode != 200) {
+      throw Exception(res.body);
+    }
+
+    final List data = jsonDecode(res.body);
+    final grouped = <int, List<IhmSamplingPhoto>>{};
+    for (final item in data) {
+      if (item is! Map) continue;
+      final json = Map<String, dynamic>.from(item);
+      final checkpointId = int.tryParse(
+        (json['ihmCheckpointId'] ?? json['IhmCheckpointId'] ?? '').toString(),
+      );
+      if (checkpointId == null || checkpointId <= 0) continue;
+      grouped
+          .putIfAbsent(checkpointId, () => [])
+          .add(IhmSamplingPhoto.fromJson(json));
+    }
+    return grouped;
+  }
+
+  /// Applicable layouts for every area of a job in one request, keyed by area
+  /// id. Returns null when the server does not support the bulk endpoint yet
+  /// (callers then fall back to [fetchIhmLayouts] per area).
+  static Future<Map<int, List<IhmLayoutImage>>?> fetchIhmAreaLayouts(
+    int jobId,
+  ) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/ihm-survey/jobs/$jobId/area-layouts'),
+      headers: await _authHeaders(),
+    );
+
+    if (res.statusCode == 404 || res.statusCode == 405) return null;
+    if (res.statusCode != 200) throw Exception(res.body);
+
+    final List data = jsonDecode(res.body);
+    final result = <int, List<IhmLayoutImage>>{};
+    for (final item in data) {
+      if (item is! Map) continue;
+      final areaId = int.tryParse(
+        (item['areaId'] ?? item['AreaId'] ?? '').toString(),
+      );
+      if (areaId == null || areaId <= 0) continue;
+      final layouts = (item['layouts'] ?? item['Layouts']) as List? ?? [];
+      result[areaId] = layouts
+          .whereType<Map>()
+          .map((x) => IhmLayoutImage.fromJson(Map<String, dynamic>.from(x)))
+          .toList();
+    }
+    return result;
+  }
+
   static Future<IhmSamplingPhoto> uploadCheckpointPhoto({
     required IhmCheckpoint checkpoint,
     required Uint8List fileBytes,
