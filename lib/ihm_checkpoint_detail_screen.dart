@@ -878,7 +878,12 @@ class _AreaTabState extends State<_AreaTab> {
         cachedMarkers = (await IhmOfflineService.getLocalMarkers(jobId))
             .where((m) => m.ihmAreaId == areaId)
             .toList();
-        if (mounted && seq == _loadSeq && (layouts.isNotEmpty || cachedMarkers.isNotEmpty)) {
+        // When online and no layout is cached yet, keep the loader visible
+        // instead of drawing pins on an empty placeholder; the network
+        // request below will download and show the layout.
+        final showCached =
+            layouts.isNotEmpty || (!online && cachedMarkers.isNotEmpty);
+        if (mounted && seq == _loadSeq && showCached) {
           final cachedPath = layouts.isNotEmpty
               ? layouts.first.filePath
               : cachedMarkers.first.imagePath;

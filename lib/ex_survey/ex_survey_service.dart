@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:Auras/app_config.dart';
 import 'package:Auras/ex_survey/ex_survey_models.dart';
+import 'package:Auras/service/auth_session.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -17,8 +18,7 @@ class ExSurveyService {
   }
 
   static Future<Map<String, String>> _headers({bool json = false}) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('token') ?? '';
+    final token = await AuthSession.validToken();
     return {
       if (json) 'Content-Type': 'application/json',
       if (token.isNotEmpty) 'Authorization': 'Bearer $token',

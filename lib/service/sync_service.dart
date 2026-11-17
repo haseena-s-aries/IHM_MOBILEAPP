@@ -12,6 +12,7 @@ import 'package:Auras/model/towage.dart';
 import 'package:Auras/network/http_override_initilalizer.dart';
 import 'package:Auras/service/IhmOfflineService.dart';
 import 'package:Auras/service/api_service.dart';
+import 'package:Auras/service/auth_session.dart';
 import 'package:Auras/service/survey_job_offline_service.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -126,6 +127,13 @@ class SyncService {
     final token = prefs.getString('token') ?? '';
     final userId = prefs.getInt('userId') ?? 0;
     return isLoggedIn && token.isNotEmpty && userId > 0;
+  }
+
+  static Future<bool> _hasUsableToken() async {
+    final token = await AuthSession.validToken();
+    if (token.isEmpty) return false;
+    final expiry = AuthSession.tokenExpiry(token);
+    return expiry == null || expiry.isAfter(DateTime.now().toUtc());
   }
 
   static Future<void> logoutAndClearUserData() async {
@@ -351,6 +359,12 @@ class SyncService {
           ihmCompletionFilter: ihmCompletionFilter,
           jobCompletionFilter: jobCompletionFilter,
         );
+        // An expired session makes the server return an empty list instead
+        // of 401. Never wipe the offline job cache with such a response.
+        if (jobs.isEmpty && !(await _hasUsableToken())) {
+          fetchFailures++;
+          return;
+        }
         await SurveyJobOfflineService.cacheSurveyJobs(
           surveyType: surveyType,
           isAdmin: isAdmin,
