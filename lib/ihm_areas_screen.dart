@@ -585,8 +585,16 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
     }
 
     try {
+      var target = checkpoint;
+      // Not decided yet: the letter typed decides Sample or Visual.
+      if (checkpoint.isUndecided) {
+        target = await IhmOfflineService.saveCheckpointProcedure(
+          checkpoint: checkpoint,
+          procedureType: value.startsWith('V') ? 'Visual' : 'Sample',
+        );
+      }
       final saved = await IhmOfflineService.saveSampleNumber(
-        checkpoint: checkpoint,
+        checkpoint: target,
         sampleNo: value,
       );
       if (!mounted) return;
@@ -630,7 +638,9 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
         text: checkpoint.locationRemarks ?? '',
       ),
     };
-    var procedure = checkpoint.isSample ? 'Sample' : 'Visual';
+    var procedure = checkpoint.isSample
+        ? 'Sample'
+        : (checkpoint.isVisual ? 'Visual' : 'Not decided');
     var isPchm = checkpoint.isPchm;
 
     final updated = await showDialog<IhmCheckpoint>(
@@ -682,9 +692,20 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
                   DropdownButtonFormField<String>(
                     value: procedure,
                     decoration: const InputDecoration(labelText: 'Procedure'),
-                    items: const [
-                      DropdownMenuItem(value: 'Visual', child: Text('Visual')),
-                      DropdownMenuItem(value: 'Sample', child: Text('Sample')),
+                    items: [
+                      if (checkpoint.isUndecided)
+                        const DropdownMenuItem(
+                          value: 'Not decided',
+                          child: Text('Not decided'),
+                        ),
+                      const DropdownMenuItem(
+                        value: 'Visual',
+                        child: Text('Visual'),
+                      ),
+                      const DropdownMenuItem(
+                        value: 'Sample',
+                        child: Text('Sample'),
+                      ),
                     ],
                     onChanged: (value) {
                       if (value != null) {
@@ -711,7 +732,8 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
               icon: const Icon(Icons.save_outlined),
               label: const Text('Save Changes'),
               onPressed: () async {
-                if (fields['sampleNo']!.text.trim().isEmpty ||
+                if ((fields['sampleNo']!.text.trim().isEmpty &&
+                        procedure != 'Not decided') ||
                     fields['description']!.text.trim().isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
@@ -845,11 +867,66 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
   String _typeLabel(IhmCheckpoint c) {
     if (c.isSample) return 'SAMPLE';
     if (c.isVisual) return 'VISUAL';
-    return 'UNSET';
+    return 'NOT DECIDED';
   }
 
   String _checkpointDisplayLabel(IhmCheckpoint checkpoint) {
     return checkpoint.sampleNo;
+  }
+
+  String _numberButtonText(IhmCheckpoint c) {
+    if (_hasEnteredNumber(c)) return c.sampleNo.trim().toUpperCase();
+    if (c.isUndecided) return 'Enter no.';
+    return '${c.isVisual ? 'V' : 'S'} · Enter no.';
+  }
+
+  /// Compact [S | V] choice for checkpoints left blank in the Excel.
+  Widget _procedureChooser(IhmCheckpoint c) {
+    Widget option(String letter, String type, Color color, BorderRadius radius) {
+      return Tooltip(
+        message: 'Set as $type',
+        child: InkWell(
+          borderRadius: radius,
+          onTap: () => _changeProcedure(c, type),
+          child: Container(
+            width: 34,
+            height: 28,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: radius,
+              border: Border.all(color: color.withValues(alpha: 0.7)),
+            ),
+            child: Text(
+              letter,
+              style: TextStyle(
+                color: color,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        option(
+          'S',
+          'Sample',
+          _A.accentRed,
+          const BorderRadius.horizontal(left: Radius.circular(8)),
+        ),
+        option(
+          'V',
+          'Visual',
+          _A.accentGreen,
+          const BorderRadius.horizontal(right: Radius.circular(8)),
+        ),
+      ],
+    );
   }
 
   Widget _sectionLabel(String text) => Text(
@@ -889,9 +966,28 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
                 fontWeight: FontWeight.w700,
               ),
             ),
-            Text(
-              '${checkpoints.length} checkpoints',
-              style: TextStyle(color: _c.textSecond, fontSize: 11),
+            Builder(
+              builder: (context) {
+                final undecided = checkpoints
+                    .where((c) => c.isUndecided)
+                    .length;
+                return Text.rich(
+                  TextSpan(
+                    text: '${checkpoints.length} checkpoints',
+                    children: [
+                      if (undecided > 0)
+                        TextSpan(
+                          text: '  ·  $undecided not decided',
+                          style: const TextStyle(
+                            color: _A.accentAmber,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                    ],
+                  ),
+                  style: TextStyle(color: _c.textSecond, fontSize: 11),
+                );
+              },
             ),
           ],
         ),
@@ -981,10 +1077,7 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
                             children: [
                               Flexible(
                                 child: Text(
-                                  _hasEnteredNumber(c)
-                                      ? _checkpointDisplayLabel(c)
-                                      : '${_checkpointDisplayLabel(c)}  '
-                                            '· Enter no.',
+                                  _numberButtonText(c),
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     color: _hasEnteredNumber(c)
@@ -1007,7 +1100,9 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
                       ),
                     ),
                   ),
-                  if (c.isSample || c.isVisual)
+                  if (c.isUndecided)
+                    _procedureChooser(c)
+                  else
                     OutlinedButton(
                       onPressed: () =>
                           _changeProcedure(c, c.isSample ? 'Visual' : 'Sample'),

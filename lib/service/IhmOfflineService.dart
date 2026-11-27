@@ -419,9 +419,12 @@ class IhmOfflineService {
     final procedureCode = isVisual ? 'V' : 'S';
     final updatedCode = RegExp(r'^[SV](\d+)$', caseSensitive: false).hasMatch(currentCode)
         ? '$procedureCode${currentCode.substring(1)}'
-        : (currentCode.toUpperCase() == 'S' || currentCode.toUpperCase() == 'V'
-            ? procedureCode
-            : currentCode);
+        : (currentCode.isEmpty ||
+                  currentCode == '-' ||
+                  currentCode.toUpperCase() == 'S' ||
+                  currentCode.toUpperCase() == 'V'
+              ? procedureCode
+              : currentCode);
 
     await _upsertCheckpointBase(db, checkpoint);
     await db.update(
