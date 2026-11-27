@@ -110,6 +110,24 @@ class _IhmCheckpointDetailScreenState extends State<IhmCheckpointDetailScreen> {
 
   Future<void> _save() async {
     if (_saving) return;
+    // A checkpoint left blank (S/V) in the Excel must be set to Sample or
+    // Visual before it can be marked Done.
+    if (_normalizeAuditStatus(auditStatus) == 'Done' &&
+        checkpoint.isUndecided) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.help_outline, color: Colors.white, size: 18),
+              SizedBox(width: 10),
+              Expanded(child: Text('Choose Sample or Visual first')),
+            ],
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
     setState(() => _saving = true);
     try {
       final updated = await IhmOfflineService.saveCheckpointDetails(

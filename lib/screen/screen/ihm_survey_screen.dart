@@ -108,6 +108,9 @@ class _IHMSurveyScreenState extends State<IHMSurveyScreen>
   int get _totalSamples => _areas.isEmpty
       ? widget.totalSamples
       : _checkpoints.where((x) => x.isSample).length;
+  int get _totalUndecided => _areas.isEmpty
+      ? 0
+      : _checkpoints.where((x) => x.isUndecided).length;
   int get _totalCheckpoints => _areas.isEmpty
       ? widget.totalVisuals + widget.totalSamples
       : _checkpoints.length;
@@ -209,6 +212,15 @@ class _IHMSurveyScreenState extends State<IHMSurveyScreen>
                     Icons.science_rounded,
                     _A.accentAmber,
                   ),
+                  if (_totalUndecided > 0) ...[
+                    const SizedBox(width: 14),
+                    _buildBreakdownCard(
+                      "Not decided",
+                      _totalUndecided,
+                      Icons.help_outline_rounded,
+                      Colors.blueGrey,
+                    ),
+                  ],
                 ],
               ),
 

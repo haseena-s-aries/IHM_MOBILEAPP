@@ -172,14 +172,18 @@ class IhmCheckpoint {
   };
 
   bool get isSample {
+    if (isVisual) return false;
     final value = samplingCheck?.trim().toUpperCase() ?? '';
-    return value == 'S';
+    return value == 'S' || value.startsWith('SAMPL');
   }
 
   bool get isVisual {
     final value = visualCheck?.trim().toUpperCase() ?? '';
-    return value == 'V';
+    return value == 'V' || value.startsWith('VISUAL');
   }
+
+  /// Sample / Visual left blank in the Excel and not chosen yet.
+  bool get isUndecided => !isSample && !isVisual;
 
   bool get isAudited {
     final value = auditStatus.trim().toLowerCase().replaceAll(RegExp(r'[\s_-]'), '');
@@ -189,7 +193,7 @@ class IhmCheckpoint {
   String get procedureType {
     if (isSample) return 'Sample';
     if (isVisual) return 'Visual';
-    return 'Pending';
+    return 'Not decided';
   }
 
   IconData get procedureIcon {
