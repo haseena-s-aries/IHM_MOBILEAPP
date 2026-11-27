@@ -479,6 +479,126 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
     await _refreshCurrentArea();
   }
 
+  bool _hasEnteredNumber(IhmCheckpoint checkpoint) =>
+      RegExp(r'^[SV]\d+$', caseSensitive: false)
+          .hasMatch(checkpoint.sampleNo.trim());
+
+  /// Lets the surveyor type the sample / visual number (S01, V01, ...).
+  /// Numbers are no longer generated automatically.
+  Future<void> _enterSampleNumber(IhmCheckpoint checkpoint) async {
+    final prefix = checkpoint.isVisual
+        ? 'V'
+        : (checkpoint.isSample ? 'S' : '');
+    final current = checkpoint.sampleNo.trim().toUpperCase();
+    final controller = TextEditingController(
+      text: _hasEnteredNumber(checkpoint) ? current : prefix,
+    );
+    controller.selection = TextSelection.collapsed(
+      offset: controller.text.length,
+    );
+    String? errorText;
+
+    final value = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          void submit() {
+            final text = controller.text.trim().toUpperCase();
+            if (!RegExp(r'^[SV]\d+$').hasMatch(text)) {
+              setDialogState(
+                () => errorText = 'Enter S or V followed by a number, e.g. '
+                    '${prefix.isEmpty ? 'S' : prefix}01',
+              );
+              return;
+            }
+            if (prefix.isNotEmpty && !text.startsWith(prefix)) {
+              setDialogState(
+                () => errorText = prefix == 'S'
+                    ? 'This is a Sample checkpoint, so the number must start '
+                          'with S. Use "Change to V" first to make it Visual.'
+                    : 'This is a Visual checkpoint, so the number must start '
+                          'with V. Use "Change to S" first to make it Sample.',
+              );
+              return;
+            }
+            Navigator.pop(dialogContext, text);
+          }
+
+          return AlertDialog(
+            title: Text(
+              prefix == 'V'
+                  ? 'Visual Number'
+                  : (prefix == 'S' ? 'Sample Number' : 'Sample / Visual Number'),
+            ),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              textCapitalization: TextCapitalization.characters,
+              decoration: InputDecoration(
+                hintText: '${prefix.isEmpty ? 'S' : prefix}01',
+                errorText: errorText,
+                errorMaxLines: 3,
+              ),
+              onSubmitted: (_) => submit(),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(onPressed: submit, child: const Text('Save')),
+            ],
+          );
+        },
+      ),
+    );
+    controller.dispose();
+    if (value == null || value == current || !mounted) return;
+
+    final used = await IhmOfflineService.isSampleNumberUsed(
+      jobId: checkpoint.surveyJobId,
+      sampleNo: value,
+      excludeCheckpointId: checkpoint.id,
+    );
+    if (used && mounted) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Number already used'),
+          content: Text(
+            '$value is already used by another checkpoint in this job. '
+            'Save it anyway?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Save anyway'),
+            ),
+          ],
+        ),
+      );
+      if (proceed != true) return;
+    }
+
+    try {
+      final saved = await IhmOfflineService.saveSampleNumber(
+        checkpoint: checkpoint,
+        sampleNo: value,
+      );
+      if (!mounted) return;
+      setState(() => _mergeCheckpoint(saved));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save the number: $error')),
+      );
+    }
+  }
+
   Future<void> _editCheckpoint(IhmCheckpoint checkpoint) async {
     final fields = <String, TextEditingController>{
       'sampleNo': TextEditingController(text: checkpoint.sampleNo),
@@ -846,12 +966,44 @@ class _IhmAreaChecklistScreenState extends State<IhmAreaChecklistScreen> {
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(
-                      _checkpointDisplayLabel(c),
-                      style: TextStyle(
-                        color: _c.textPrimary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(6),
+                        onTap: () => _enterSampleNumber(c),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 4,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  _hasEnteredNumber(c)
+                                      ? _checkpointDisplayLabel(c)
+                                      : '${_checkpointDisplayLabel(c)}  '
+                                            '· Enter no.',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: _hasEnteredNumber(c)
+                                        ? _c.textPrimary
+                                        : _c.textSecond,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.edit_note_rounded,
+                                size: 16,
+                                color: color,
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),

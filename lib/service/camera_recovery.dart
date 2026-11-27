@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:Auras/ihm_area.dart';
 import 'package:Auras/service/IhmOfflineService.dart';
 import 'package:Auras/service/auth_session.dart';
+import 'package:Auras/service/phone_gallery.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -96,6 +97,10 @@ class CameraRecovery {
         try {
           final bytes = await file.readAsBytes();
           if (bytes.isEmpty) continue;
+          await PhoneGallery.saveCheckpointPhoto(
+            bytes: bytes,
+            sampleNo: checkpoint.sampleNo,
+          );
           await IhmOfflineService.saveCheckpointPhoto(
             checkpoint: checkpoint,
             fileBytes: bytes,

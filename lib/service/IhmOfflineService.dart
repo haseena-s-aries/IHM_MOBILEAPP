@@ -80,6 +80,13 @@ class IhmOfflineService {
           );
 
           if (existing.isNotEmpty && existing.first['synced'] == 0) {
+            // Unsynced local edits win, but still take the Excel row order.
+            await txn.update(
+              'ihm_checkpoints',
+              {'sourceRowNumber': checkpoint.sourceRowNumber},
+              where: 'id = ?',
+              whereArgs: [checkpoint.id],
+            );
             continue;
           }
 
@@ -203,7 +210,12 @@ class IhmOfflineService {
         'ihm_checkpoints',
         where: 'ihmAreaId = ?',
         whereArgs: [area['id']],
-        orderBy: 'sampleNo ASC',
+        // Same order as the uploaded Excel sheet (and the server). Sorting by
+        // sampleNo put every S above every V and made a card jump when it
+        // was changed between S and V.
+        orderBy:
+            'CASE WHEN sourceRowNumber IS NULL THEN 1 ELSE 0 END, '
+            'sourceRowNumber ASC, id ASC',
       );
 
       result.add(
@@ -306,13 +318,8 @@ class IhmOfflineService {
   static Future<IhmCheckpoint> saveFullCheckpoint(
     IhmCheckpoint checkpoint,
   ) async {
-    // Offline-created/imported checkpoints can start as just S or V. Assign a
-    // number only when the surveyor marks the checkpoint Done; existing
-    // numbered values are never rewritten.
-    if (!kIsWeb && _isDoneStatus(checkpoint.auditStatus)) {
-      checkpoint = await _numberIfNeeded(checkpoint);
-    }
-
+    // Sample / visual numbers (S01, V01, ...) are entered by the surveyor and
+    // saved exactly as typed. They are no longer generated automatically.
     if (kIsWeb) {
       return ApiService.updateIhmCheckpointDetails(checkpoint: checkpoint);
     }
@@ -343,6 +350,8 @@ class IhmOfflineService {
     final values = checkpoint.toLocalMap()
       ..['synced'] = 0
       ..['updatedAt'] = DateTime.now().toIso8601String();
+    // Never clear the Excel row order with a copy that lacks it.
+    if (values['sourceRowNumber'] == null) values.remove('sourceRowNumber');
     await _upsertCheckpointBase(db, checkpoint);
     await db.update(
       'ihm_checkpoints',
@@ -361,6 +370,36 @@ class IhmOfflineService {
     );
     await syncPendingIhmData();
     return _getLocalCheckpoint(checkpoint.id);
+  }
+
+  /// Saves a sample / visual number typed by the surveyor (e.g. S01, V01).
+  /// Works offline: the change is queued and sent on the next sync.
+  static Future<IhmCheckpoint> saveSampleNumber({
+    required IhmCheckpoint checkpoint,
+    required String sampleNo,
+  }) {
+    return saveFullCheckpoint(
+      checkpoint.copyWith(sampleNo: sampleNo.trim().toUpperCase()),
+    );
+  }
+
+  /// Whether another checkpoint of the same job already uses [sampleNo]
+  /// (checked against the data on this phone).
+  static Future<bool> isSampleNumberUsed({
+    required int jobId,
+    required String sampleNo,
+    required int excludeCheckpointId,
+  }) async {
+    if (kIsWeb) return false;
+    final db = await DatabaseHelper.instance.database;
+    final rows = await db.query(
+      'ihm_checkpoints',
+      columns: ['id'],
+      where: 'surveyJobId = ? AND id != ? AND UPPER(TRIM(sampleNo)) = ?',
+      whereArgs: [jobId, excludeCheckpointId, sampleNo.trim().toUpperCase()],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
   }
 
   static Future<IhmCheckpoint> saveCheckpointProcedure({
@@ -414,34 +453,6 @@ class IhmOfflineService {
       samplingCheck: isVisual ? '-' : 'S',
       visualCheck: isVisual ? 'V' : '-',
     );
-  }
-
-  static bool _isDoneStatus(String value) {
-    final normalized = value.trim().toLowerCase().replaceAll(RegExp(r'[\s_-]'), '');
-    return normalized == 'done' || normalized == 'completed' || normalized == '3';
-  }
-
-  static Future<IhmCheckpoint> _numberIfNeeded(IhmCheckpoint checkpoint) async {
-    final code = checkpoint.sampleNo.trim().toUpperCase();
-    if (code != 'S' && code != 'V') return checkpoint;
-
-    final db = await DatabaseHelper.instance.database;
-    final rows = await db.query(
-      'ihm_checkpoints',
-      columns: ['sampleNo'],
-      where: 'surveyJobId = ?',
-      whereArgs: [checkpoint.surveyJobId],
-    );
-    var maxNumber = 0;
-    final prefix = code;
-    for (final row in rows) {
-      final value = row['sampleNo']?.toString().trim().toUpperCase() ?? '';
-      if (!value.startsWith(prefix) || value.length <= prefix.length) continue;
-      final number = int.tryParse(value.substring(prefix.length)) ?? 0;
-      if (number > maxNumber) maxNumber = number;
-    }
-
-    return checkpoint.copyWith(sampleNo: '$prefix${(maxNumber + 1).toString().padLeft(2, '0')}');
   }
 
   static Future<List<IhmMarker>> getMarkers(int jobId, int areaId) async {
@@ -1746,6 +1757,21 @@ class IhmOfflineService {
       ..['synced'] = synced
       ..['updatedAt'] = DateTime.now().toIso8601String();
 
+    // Keep the Excel row number if this copy of the checkpoint lacks it, so
+    // the card does not move.
+    if (values['sourceRowNumber'] == null) {
+      final existing = await db.query(
+        'ihm_checkpoints',
+        columns: ['sourceRowNumber'],
+        where: 'id = ?',
+        whereArgs: [checkpoint.id],
+        limit: 1,
+      );
+      if (existing.isNotEmpty) {
+        values['sourceRowNumber'] = existing.first['sourceRowNumber'];
+      }
+    }
+
     await db.insert(
       'ihm_checkpoints',
       values,
@@ -1831,6 +1857,7 @@ class IhmOfflineService {
       'surveyJobId': row['surveyJobId'],
       'ihmAreaId': row['ihmAreaId'],
       'isPchm': row['isPchm'],
+      'sourceRowNumber': row['sourceRowNumber'],
       'locationRemarks': row['locationRemarks'],
     });
   }
