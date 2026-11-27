@@ -132,9 +132,25 @@ class _LoginScreenState extends State<LoginScreen> {
           .replaceFirst('Exception: Login error: ', '')
           .replaceFirst('Exception: ', '');
 
+      final lower = errorMessage.toLowerCase();
       if (errorMessage.contains('Invalid Password') ||
           errorMessage.contains('Invalid Email')) {
         errorMessage = 'Invalid email or password.';
+      } else if (lower.contains('failed host lookup') ||
+          lower.contains('socketexception') ||
+          lower.contains('socketfailed') ||
+          lower.contains('network is unreachable') ||
+          lower.contains('connection refused') ||
+          lower.contains('connection timed out') ||
+          lower.contains('clientexception')) {
+        // The phone could not reach the server (no internet, or DNS blocked).
+        // This is not an account problem: the same email can be signed in
+        // on more than one phone.
+        errorMessage =
+            'Cannot connect to the server.\n\n'
+            'Please check this phone\'s internet connection (mobile data or '
+            'Wi-Fi) and try again. If you have internet, turn off '
+            '"Private DNS" or any VPN / ad blocker in phone settings.';
       } else if (errorMessage.trim().isEmpty) {
         errorMessage = 'Login failed. Please try again.';
       }

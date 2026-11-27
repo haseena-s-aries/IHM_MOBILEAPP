@@ -1,3 +1,4 @@
+import 'package:Auras/service/phone_gallery.dart';
 import 'package:Auras/service/camera_recovery.dart';
 import 'package:Auras/ThemeNotifier.dart';
 import 'package:Auras/ihm_area.dart';
@@ -1618,9 +1619,19 @@ class _ImagesTabState extends State<_ImagesTab> {
       }
 
       final uploadedPhotos = <IhmSamplingPhoto>[];
+      var phoneSaveFailed = false;
 
       for (final file in files) {
         final bytes = await file.readAsBytes();
+        // Camera photos: also keep a copy in the phone's storage
+        // (Pictures/IHM/<date>), online or offline.
+        if (source == ImageSource.camera) {
+          final savedTo = await PhoneGallery.saveCheckpointPhoto(
+            bytes: bytes,
+            sampleNo: widget.checkpoint.sampleNo,
+          );
+          if (savedTo == null) phoneSaveFailed = true;
+        }
         final uploaded = await IhmOfflineService.saveCheckpointPhoto(
           checkpoint: widget.checkpoint,
           fileBytes: bytes,
@@ -1634,6 +1645,16 @@ class _ImagesTabState extends State<_ImagesTab> {
         photos.addAll(uploadedPhotos);
         uploading = false;
       });
+      if (phoneSaveFailed) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Photo added to the checkpoint, but the copy in phone storage '
+              '(Pictures/IHM) could not be saved.',
+            ),
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => uploading = false);

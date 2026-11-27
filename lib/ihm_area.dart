@@ -67,6 +67,10 @@ class IhmCheckpoint {
   final bool isPchm;
   final String? locationRemarks;
 
+  /// Row number in the uploaded Excel sheet. Checkpoints are always shown in
+  /// this order (never grouped by Sample / Visual).
+  final int? sourceRowNumber;
+
   IhmCheckpoint({
     required this.id,
     required this.sampleNo,
@@ -93,6 +97,7 @@ class IhmCheckpoint {
     this.isPchm = false,
     this.locationRemarks,
     this.documentAnalysisResult,
+    this.sourceRowNumber,
   });
 
   factory IhmCheckpoint.fromJson(Map<String, dynamic> json) {
@@ -130,6 +135,9 @@ class IhmCheckpoint {
       ihmAreaId: int.tryParse(json['ihmAreaId'].toString()) ?? 0,
       isPchm: json['isPchm'] == true || json['isPchm'] == 1,
       locationRemarks: json['locationRemarks']?.toString(),
+      sourceRowNumber: int.tryParse(
+        (json['sourceRowNumber'] ?? json['SourceRowNumber'] ?? '').toString(),
+      ),
     );
   }
 
@@ -158,6 +166,7 @@ class IhmCheckpoint {
     'documentAnalysisResult': documentAnalysisResult,
     'isPchm': isPchm ? 1 : 0,
     'locationRemarks': locationRemarks,
+    'sourceRowNumber': sourceRowNumber,
     'synced': 1,
     'updatedAt': DateTime.now().toIso8601String(),
   };
@@ -237,6 +246,7 @@ class IhmCheckpoint {
     ihmAreaId: ihmAreaId,
     isPchm: isPchm ?? this.isPchm,
     locationRemarks: locationRemarks ?? this.locationRemarks,
+    sourceRowNumber: sourceRowNumber,
   );
 }
 

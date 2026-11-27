@@ -32,7 +32,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 13,
+      version: 14,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -234,6 +234,16 @@ class DatabaseHelper {
 
     if (oldVersion < 13) {
       await _movePendingIhmPhotosToNegativeIds(db);
+    }
+
+    if (oldVersion < 14) {
+      // Excel row order for checkpoint cards.
+      await _addColumnIfMissing(
+        db,
+        tableName: 'ihm_checkpoints',
+        columnName: 'sourceRowNumber',
+        definition: 'INTEGER',
+      );
     }
   }
 
