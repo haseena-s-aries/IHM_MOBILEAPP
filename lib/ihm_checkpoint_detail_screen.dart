@@ -1664,11 +1664,22 @@ class _ImagesTabState extends State<_ImagesTab> {
         uploading = false;
       });
       if (phoneSaveFailed) {
+        final reason = PhoneGallery.lastError;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Photo added to the checkpoint, but the copy in phone storage '
-              '(Pictures/IHM) could not be saved.',
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 6),
+            content: Row(
+              children: [
+                const Icon(Icons.sd_card_alert_outlined, color: Colors.white),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Photo added. Phone copy not saved'
+                    '${reason == null || reason.isEmpty ? '' : '\n$reason'}',
+                  ),
+                ),
+              ],
             ),
           ),
         );
